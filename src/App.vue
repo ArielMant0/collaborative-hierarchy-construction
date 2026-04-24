@@ -68,7 +68,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import * as d3 from 'd3';
 import mechanicsData from './tag-hierarchy-mechanics.json';
 
@@ -104,6 +104,78 @@ const splitModal = ref({ show: false, node: null });
 const multiMergeModal = ref({ show: false });
 const resolutionModal = ref({ show: false, conflict: null, index: null, node: null, options: [] });
 
+// Keyboard Shortcuts
+function handleGlobalKeydown(e) {
+  // 1. Escape: Must run even if an input is focused to allow canceling out of text fields
+  if (e.key === 'Escape') {
+    if (renameModal.value.show) renameModal.value.show = false;
+    else if (splitModal.value.show) splitModal.value.show = false;
+    else if (multiMergeModal.value.show) multiMergeModal.value.show = false;
+    else if (resolutionModal.value.show) resolutionModal.value.show = false;
+    else clearSelection();
+    
+    if (document.activeElement) document.activeElement.blur();
+    return;
+  }
+
+  // 2. Prevent triggering shortcuts when typing inside form inputs
+  const activeTag = document.activeElement?.tagName?.toLowerCase();
+  if (activeTag === 'input' || activeTag === 'textarea') return;
+
+  // 3. Delete/Backspace: Trigger node deletion
+  if (e.key === 'Delete' || e.key === 'Backspace') {
+    if (selectedNodes.value.length > 0) {
+      deleteNode();
+    }
+    return;
+  }
+
+  // 4. Ctrl+S / Cmd+S: Split exactly one node
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+    e.preventDefault(); 
+    if (selectedNodes.value.length === 1) {
+      openSplitModal();
+    }
+    return;
+  }
+
+  // 5. Ctrl+M / Cmd+M: Merge multiple nodes
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'm') {
+    e.preventDefault();
+    if (selectedNodes.value.length > 1) {
+      openMultiMergeModal();
+    }
+    return;
+  }
+
+  // 6. Ctrl+Left / Ctrl+Right (Cmd+Left / Cmd+Right): Sibling Navigation
+  if ((e.ctrlKey || e.metaKey) && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+    e.preventDefault(); 
+    
+    // We navigate based on the most recently selected node (the last one in the array)
+    if (selectedNodes.value.length >= 1) {
+      const currentNode = selectedNodes.value[selectedNodes.value.length - 1];
+      const parent = currentNode.parent;
+      
+      if (!parent || !parent.children) return;
+
+      const siblings = parent.children;
+      const currentIndex = siblings.findIndex(s => s.data.id === currentNode.data.id);
+      const targetIndex = e.key === 'ArrowLeft' ? currentIndex - 1 : currentIndex + 1;
+      
+      if (targetIndex >= 0 && targetIndex < siblings.length) {
+        const targetNode = siblings[targetIndex];
+        
+        // If Shift is held, we perform a multi-selection
+        // If not, we perform a singular selection (standard move)
+        const isMultiSelect = e.shiftKey;
+        toggleSelection(targetNode, isMultiSelect);
+      }
+    }
+    return;
+  }
+}
+
 // 2. Lifecycle
 onMounted(() => { 
   if (!sharedTree.get('root')) {
@@ -112,6 +184,11 @@ onMounted(() => {
     ydoc.transact(() => { sharedTree.set('root', JSON.stringify(baseData)); });
   }
   syncFromNetwork(); 
+  window.addEventListener('keydown', handleGlobalKeydown);
+});
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleGlobalKeydown);
 });
 
 // 3. Node Operations
