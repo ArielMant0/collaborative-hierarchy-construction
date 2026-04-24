@@ -256,13 +256,18 @@ function openSplitModal() {
   splitModal.value = { show: true, node: n };
 }
 
-function confirmSplit(newNamesString) {
+function confirmSplit(payload) {
+  const { names: newNamesString, keepOriginal } = payload;
   const d3Node = splitModal.value.node;
   const nodeData = d3Node.data;
   const parentData = d3Node.parent.data;
   const names = newNamesString.split(',').map(n => n.trim()).filter(n => n);
   
-  if (names.length < 2) return alert("Provide at least two names.");
+  // If keeping original, 1 new name is a valid split. Otherwise, need at least 2.
+  if (names.length < (keepOriginal ? 1 : 2)) {
+    return alert(`Provide at least ${keepOriginal ? 'one' : 'two'} new names.`);
+  }
+
   const ghostIds = [];
 
   if (!parentData.children) parentData.children = [];
@@ -274,7 +279,15 @@ function confirmSplit(newNamesString) {
 
   nodeData.action = 'pending-split';
   if (!nodeData.conflicts) nodeData.conflicts = [];
-  nodeData.conflicts.push({ id: generateId(), type: 'split-proposal', ghostIds: ghostIds, newNames: names, by: netState.username });
+  
+  nodeData.conflicts.push({ 
+    id: generateId(), 
+    type: 'split-proposal', 
+    ghostIds: ghostIds, 
+    newNames: names, 
+    keepOriginal: keepOriginal,
+    by: netState.username 
+  });
 
   applyChange();
   splitModal.value.show = false;
@@ -402,10 +415,20 @@ function executeResolution(option) {
         if (gIdx > -1) liveParent.children.splice(gIdx, 1);
       });
     }
-    const idx = liveParent.children.findIndex(c => c.id === liveNode.id);
-    if (idx > -1) liveParent.children.splice(idx, 1);
     
     const historicalSplitTree = { name: liveNode.name, children: conflict.newNames.map(n => ({ name: n })) };
+    
+    if (!conflict.keepOriginal) {
+      // Destructive: physically remove the original node
+      const idx = liveParent.children.findIndex(c => c.id === liveNode.id);
+      if (idx > -1) liveParent.children.splice(idx, 1);
+    } else {
+      // Non-Destructive: log history onto the surviving original node
+      liveNode.splitStructure = historicalSplitTree;
+      liveNode.splitFrom = liveNode.name; 
+    }
+
+    // Add new siblings
     conflict.newNames.forEach(name => {
       liveParent.children.push({
         id: generateId(), name: name, action: 'added', lastEditedBy: netState.username,

@@ -11,7 +11,13 @@
         placeholder="e.g. Frontend, Backend, DevOps"
         @keyup.enter="submit"
       />
-      <div class="modal-actions">
+      
+      <label style="font-size: 13px; display: flex; align-items: center; gap: 8px; margin-top: 4px;">
+        <input type="checkbox" v-model="keepOriginal" />
+        Keep original node as sibling
+      </label>
+
+      <div class="modal-actions" style="margin-top: 8px;">
         <button @click="close" class="sleek-btn outline">Cancel</button>
         <button @click="submit" class="sleek-btn primary" style="background: #e91e63;">Propose Split</button>
       </div>
@@ -26,11 +32,17 @@ const props = defineProps({ show: Boolean, nodeName: String });
 const emit = defineEmits(['close', 'submit']);
 
 const newNames = ref('');
+const keepOriginal = ref(false);
 
 watch(() => props.show, (isOpen) => {
-  if (!isOpen) newNames.value = '';
+  if (!isOpen) {
+    newNames.value = '';
+    keepOriginal.value = false;
+  }
 });
 
 function close() { emit('close'); }
-function submit() { emit('submit', newNames.value); }
+function submit() { 
+  emit('submit', { names: newNames.value, keepOriginal: keepOriginal.value }); 
+}
 </script>
