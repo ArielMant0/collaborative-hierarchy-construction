@@ -70,7 +70,6 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue';
 import * as d3 from 'd3';
-import * as Y from 'yjs';
 import mechanicsData from './tag-hierarchy-mechanics.json';
 
 // Composables
@@ -88,11 +87,12 @@ import MergeModal from './components/ui/modals/MergeModal.vue';
 import ConflictModal from './components/ui/modals/ConflictModal.vue';
 
 // Services & Utils
-import { sharedTree, ydoc } from './services/crdt.service.js';
-import { generateId, canEditNode, cloneNode, addUUIDs, flattenTree } from './utils/helpers.js';
+import { sharedTree, ydoc, updateSharedTreeRoot, encodeCurrentState } from './services/crdt.service.js';
+import { webrtcService } from './services/webrtc.service.js';
+import { generateId, canEditNode, cloneNode, addUUIDs, removeDraftFlag } from './utils/helpers.js';
 
 // 1. Initialize Composables
-const { netState, joinId, initHost, joinHost } = useNetwork();
+const { netState, initHost, joinHost } = useNetwork();
 const { isDraftMode, liveTreeData, draftTreeData, activeData, switchMode, applyChange, commitChanges, syncFromNetwork } = useTreeState(netState);
 const { selectedNodes, isSingleLeafSelected, clearSelection, toggleSelection } = useSelection();
 
@@ -345,10 +345,8 @@ function executeResolution(option) {
   const { conflict, node } = resolutionModal.value;
   
   // 1. FORCE LIVE CONTEXT: Resolutions must update the shared state immediately
-  // We use the liveTreeData to ensure the broadcast is accurate
   const root = d3.hierarchy(liveTreeData.value);
   
-  // Find the node and its parent in the LIVE data
   let liveNode = null;
   let liveParent = null;
   root.each(n => {
@@ -357,6 +355,10 @@ function executeResolution(option) {
   });
 
   if (!liveNode) return;
+
+  // CACHE CONFLICTS FIRST
+  // If we purge them before the merge loop, we destroy the data needed to delete sources and build history.
+  const cachedConflicts = liveNode.conflicts ? [...liveNode.conflicts] : [];
 
   // 2. CONFLICT PURGING: Choosing one path invalidates all other pending proposals on this node
   liveNode.conflicts = [];
@@ -414,8 +416,9 @@ function executeResolution(option) {
 
   // --- MERGE RESOLUTION ---
   else if (act.includes('merge')) {
-    const isMulti = act.startsWith('n-merges');
-    const mergesToProcess = isMulti ? node.conflicts.filter(c => c.type === 'merge-proposal') : [conflict];
+    // Merges must be completely atomic. Regardless of whether the user clicked 
+    //a single conflict or "Approve All", we must process ALL source nodes attached to this target.
+    const mergesToProcess = cachedConflicts.filter(c => c.type === 'merge-proposal');
     
     if (!liveNode.mergedStructure) liveNode.mergedStructure = { source: { children: [] } };
     
@@ -429,11 +432,16 @@ function executeResolution(option) {
       });
 
       if (sourceParent && sourceData) {
-        // Log history
+        // Log history object
         liveNode.mergedStructure.source.children.push({
           name: sourceData.name,
           children: sourceData.children ? cloneNode(sourceData, netState.username).children : []
         });
+
+        // Set the property d3.renderer.js expects for the tooltip
+        liveNode.mergedFrom = liveNode.mergedFrom 
+          ? `${liveNode.mergedFrom}, ${sourceData.name}` 
+          : sourceData.name;
 
         // Physically DELETE the source node from the tree
         const srcIdx = sourceParent.children.findIndex(c => c.id === mConf.sourceId);
@@ -448,7 +456,7 @@ function executeResolution(option) {
     });
     
     liveNode.name = conflict.proposedName || liveNode.name;
-    liveNode.action = 'added'; // Solidify the new category
+    liveNode.action = 'added'; 
     if (liveNode.children) liveNode.children = liveNode.children.filter(c => !c.isGhost);
   }
 
@@ -456,10 +464,10 @@ function executeResolution(option) {
   
   resolutionModal.value.show = false;
   
-  // 3. GLOBAL CLEANUP: Now that sources are physically gone, losers will be detected
+  // 3. GLOBAL CLEANUP: When ALL sources are physically gone, losers will be detected
   cleanupOrphanedArtifacts(); 
   
-  // 4. FORCE SYNC: Bypass draft mode and broadcast the new reality
+  // 4. FORCE SYNC AND REACTIVITY
   forceGlobalSync();
 }
 
@@ -470,7 +478,6 @@ function forceGlobalSync() {
   updateSharedTreeRoot(JSON.stringify(cleanLive));
   webrtcService.sendUpdate(encodeCurrentState(), netState.isHost);
   
-  // If we are in draft mode, we must re-sync our draft to the new live reality
   if (isDraftMode.value) {
     draftTreeData.value = JSON.parse(JSON.stringify(liveTreeData.value));
   }
@@ -480,7 +487,9 @@ function cleanupOrphanedArtifacts() {
   const root = d3.hierarchy(liveTreeData.value);
   const validGhostIds = new Set();
   const allCurrentIds = new Set();
+  const activeMergeSourceIds = new Set(); 
 
+  // 1. Build an index of all current nodes and collect active ghosts
   root.each(n => {
     allCurrentIds.add(n.data.id);
     if (n.data.conflicts) {
@@ -491,6 +500,7 @@ function cleanupOrphanedArtifacts() {
     }
   });
 
+  // 2. Prune invalid branches
   function traverseAndClean(parentData) {
     if (!parentData.children) return;
     parentData.children = parentData.children.filter(child => {
@@ -498,18 +508,36 @@ function cleanupOrphanedArtifacts() {
       if (child.isGhost && !validGhostIds.has(child.id)) return false;
 
       // COMPETITIVE MERGE INVALIDATION
-      // If this node is a merge target, and ONE of its source nodes has been 
-      // merged elsewhere (and is thus missing), this target is now invalid.
       if (child.conflicts && child.conflicts.some(c => c.type === 'merge-proposal')) {
         const mergeConflicts = child.conflicts.filter(c => c.type === 'merge-proposal');
+        
+        // A merge proposal is ONLY valid if ALL of its source nodes still exist in the tree
         const allSourcesStillExist = mergeConflicts.every(mc => allCurrentIds.has(mc.sourceId));
+        
         if (!allSourcesStillExist) return false; 
+        
+        // If the merge proposal survives, register its sources to protect their pending status
+        mergeConflicts.forEach(mc => activeMergeSourceIds.add(mc.sourceId));
       }
       return true;
     });
     parentData.children.forEach(traverseAndClean);
   }
+  
   traverseAndClean(liveTreeData.value);
+
+  // 3. CLEAN UP DANGLING ACTIONS 
+  // Any source node that belonged to a pruned merge proposal must have its hanging action cleared
+  function clearDanglingActions(node) {
+    if (node.action === 'pending-merge' && !activeMergeSourceIds.has(node.id)) {
+      delete node.action;
+    }
+    if (node.children) {
+      node.children.forEach(clearDanglingActions);
+    }
+  }
+  
+  clearDanglingActions(liveTreeData.value);
 }
 </script>
 
