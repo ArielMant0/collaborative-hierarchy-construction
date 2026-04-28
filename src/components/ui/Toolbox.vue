@@ -35,18 +35,10 @@
             </button>
           </template>
         </template>
-
-        <template v-if="selectedNodes[0].data.action && !selectedNodes[0].data.conflicts?.length">
-           <div class="divider"></div>
-           <button class="sleek-btn primary" style="background: #4caf50;" @click="$emit('approveBaseChange')">
-             Approve Base Change
-           </button>
-        </template>
       </template>
 
       <template v-else>
         <button class="sleek-btn outline" @click="$emit('restore')">Restore Node</button>
-        <button class="sleek-btn primary" style="background: #f44336;" @click="$emit('permanentlyDelete')">Permanently Delete</button>
       </template>
     </div>
 
@@ -57,7 +49,6 @@
 
       <template v-if="selectedNodes.every(n => n.data.action === 'deleted')">
         <button class="sleek-btn outline" @click="$emit('restore')">Restore</button>
-        <button class="sleek-btn primary" style="background: #f44336;" @click="$emit('permanentlyDelete')">Permanently Delete</button>
       </template>
       <template v-else>
         <button class="sleek-btn outline" style="color: #f44336; border-color: #f44336;" @click="$emit('delete')">Delete</button>
@@ -72,10 +63,11 @@ const props = defineProps({
   isSingleLeafSelected: Boolean
 });
 
+// REMOVED: 'approveBaseChange' and 'permanentlyDelete'
 defineEmits([
   'rename', 'addChild', 'split', 'toggleLock', 'delete', 
-  'restore', 'permanentlyDelete', 'multiMerge', 
-  'acceptAllMerges', 'acceptConflict', 'approveBaseChange'
+  'restore', 'multiMerge', 
+  'acceptAllMerges', 'acceptConflict'
 ]);
 
 function getConflictButtonLabel(conflict) {

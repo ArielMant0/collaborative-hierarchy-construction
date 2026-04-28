@@ -2,7 +2,7 @@
 // It handles the conflict resolution execution matrix.
 
 import { ref, computed, onMounted, onUnmounted } from 'vue';
-import { sharedTree, applyNetworkUpdate, encodeCurrentState, updateSharedTreeRoot } from '../services/crdt.service.js';
+import { sharedTree, applyNetworkUpdate, encodeCurrentState, updateSharedTreeRoot, getSharedTreeJSON } from '../services/crdt.service.js';
 import { webrtcService } from '../services/webrtc.service.js';
 import { removeDraftFlag, tagGlobalDuplicates} from '../utils/helpers.js';
 
@@ -13,16 +13,11 @@ export function useTreeState(netState) {
 
   const activeData = computed(() => isDraftMode.value ? draftTreeData.value : liveTreeData.value);
 
-  function syncFromNetwork() {
-    const treeString = sharedTree.get('root');
-    if (treeString) {
-      try {
-        const parsedData = JSON.parse(treeString);
-        tagGlobalDuplicates(parsedData); 
-        liveTreeData.value = parsedData;
-      } catch (e) {
-        console.error("Failed to parse tree data:", e);
-      }
+function syncFromNetwork() {
+    const parsedData = getSharedTreeJSON();
+    if (parsedData) {
+      tagGlobalDuplicates(parsedData); 
+      liveTreeData.value = parsedData;
     }
   }
 
@@ -69,12 +64,12 @@ export function useTreeState(netState) {
     }
   }
 
-  function applyChange() {
+function applyChange() {
     tagGlobalDuplicates(activeData.value);
     if (!isDraftMode.value) {
       const cleanLive = JSON.parse(JSON.stringify(liveTreeData.value));
       removeDraftFlag(cleanLive);
-      updateSharedTreeRoot(JSON.stringify(cleanLive));
+      updateSharedTreeRoot(cleanLive); // Pass as object
       webrtcService.sendUpdate(encodeCurrentState(), netState.isHost);
     }
   }
@@ -83,7 +78,7 @@ export function useTreeState(netState) {
     const cleanDraft = JSON.parse(JSON.stringify(draftTreeData.value));
     removeDraftFlag(cleanDraft);
     
-    updateSharedTreeRoot(JSON.stringify(cleanDraft));
+    updateSharedTreeRoot(cleanDraft); // Pass as object
     webrtcService.sendUpdate(encodeCurrentState(), netState.isHost);
     
     liveTreeData.value = cleanDraft;

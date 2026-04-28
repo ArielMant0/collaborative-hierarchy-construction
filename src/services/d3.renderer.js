@@ -27,7 +27,7 @@ export class TreeRenderer {
     this.initialRenderDone = false;
     this.nameColorScale = d3.scaleOrdinal(d3.schemePastel1);
     
-    this.ctx = { isDraftMode: false, localPeerId: null, selectedIds: new Set() };
+    this.ctx = { isDraftMode: false, localPeerId: null, selectedIds: new Set(), showDeleted: true };
     
     this.initCanvas();
     this.drag = this.createDragBehavior();
@@ -52,8 +52,13 @@ export class TreeRenderer {
 
   getStrokeColor(data) {
     if (data.isGhost) return "#9e9e9e";
+    
+    // Orange for ALL proposals (including pending deletions)
     if (data.conflicts?.length) return "#ff9800"; 
+    
+    // Red for officially executed deletions via ACTION_COLORS.deleted
     if (data.action) return ACTION_COLORS[data.action];
+    
     if (data.locked) return data.lockedBy === this.ctx.localPeerId ? COLORS.lockedMe : COLORS.lockedOther;
     return (this.ctx.isDraftMode && data._isDraft) ? COLORS.draft : COLORS.nodeDefault;
   }
@@ -65,7 +70,14 @@ export class TreeRenderer {
 
     const width = window.innerWidth;
     const height = window.innerHeight; 
-    const root = d3.hierarchy(treeData);
+    
+    // Filter out nodes marked as 'deleted' if the toggle is off
+    const childrenAccessor = (d) => {
+      if (!d.children) return null;
+      return d.children.filter(c => this.ctx.showDeleted || c.action !== 'deleted');
+    };
+    
+    const root = d3.hierarchy(treeData, childrenAccessor);
 
     const treeLayout = d3.tree().nodeSize([NODE_DIMENSIONS.width + 15, NODE_DIMENSIONS.height + 40]);
     treeLayout(root);
@@ -208,7 +220,14 @@ export class TreeRenderer {
     this.nodeElements.clear();
     this.linkElements.clear();
     
-    const root = d3.hierarchy(treeData);
+    // Filter out nodes marked as 'deleted' if the toggle is off
+    const childrenAccessor = (d) => {
+      if (!d.children) return null;
+      return d.children.filter(c => this.ctx.showDeleted || c.action !== 'deleted');
+    };
+    
+    const root = d3.hierarchy(treeData, childrenAccessor);
+
     const treeLayout = d3.tree()
       .nodeSize([NODE_DIMENSIONS.width + 20, NODE_DIMENSIONS.height + 40])
       .separation((a, b) => (a.parent === b.parent ? 1 : 1.1)); 
@@ -339,8 +358,8 @@ export class TreeRenderer {
         return COLORS.linkDefault;
       })
       .attr("stroke-width", 2)
-      .attr("stroke-dasharray", d => d.target.data.action === 'moved' ? "8,4" : "none") 
-      .attr("d", edgeLinkGen); 
+      .attr("stroke-dasharray", "none") 
+      .attr("d", edgeLinkGen);
     
     linksMerge.each((d, i, nodes) => { this.linkElements.set(d.target, d3.select(nodes[i])); });
 
@@ -402,7 +421,12 @@ export class TreeRenderer {
         return (d.data.locked || d.data.action || d.data.conflicts?.length || (this.ctx.isDraftMode && d.data._isDraft)) ? 3 : 2;
       })
       .style("opacity", d => d.data.isGhost ? 0.3 : 1)
-      .attr("fill", d => d.data.action === 'deleted' ? "#ffebee" : "#ffffff");
+      // Apply red tint to BOTH pending conflict proposals and accepted base actions
+      .attr("fill", d => {
+        const isPendingDelete = d.data.conflicts?.some(c => c.type === 'delete');
+        const isAcceptedDelete = d.data.action === 'deleted';
+        return (isPendingDelete || isAcceptedDelete) ? "#ffebee" : "#ffffff";
+      });
 
     nodesMerge.select(".node-name")
       .text(d => d.data.name)
@@ -426,11 +450,7 @@ export class TreeRenderer {
       return display.join(' | ');
     });
 
-    nodesMerge.select(".lock-icon").text(d => {
-      let text = d.data.locked ? "🔒 " : "";
-      if (d.data.conflicts?.some(c => c.type === 'delete')) text += "⚠️ DEL";
-      return text;
-    });
+    nodesMerge.select(".lock-icon").text(d => d.data.locked ? "🔒 " : "");
 
     nodesMerge.select(".merge-icon").style("opacity", d => d.data.mergedFrom ? 1 : 0);
     nodesMerge.select(".split-icon").style("opacity", d => d.data.splitFrom ? 1 : 0);
