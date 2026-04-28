@@ -28,11 +28,9 @@
       @toggleLock="toggleLock"
       @delete="deleteNode"
       @restore="restoreNode"
-      @permanentlyDelete="permanentlyDeleteNode"
       @multiMerge="openMultiMergeModal"
       @acceptAllMerges="acceptAllMerges"
       @acceptConflict="(payload) => acceptConflict(payload.conflict, payload.index)"
-      @approveBaseChange="approveCurrentChange"
     />
 
     <RenameModal 
@@ -56,14 +54,6 @@
       @submit="confirmMultiMerge" 
     />
 
-    <ConflictModal 
-      :show="resolutionModal.show" 
-      :conflict="resolutionModal.conflict" 
-      :nodeName="resolutionModal.node?.name" 
-      :options="resolutionModal.options" 
-      @close="resolutionModal.show = false" 
-      @execute="executeResolution" 
-    />
   </div>
 </template>
 
@@ -84,10 +74,9 @@ import TreeCanvas from './components/canvas/TreeCanvas.vue';
 import RenameModal from './components/ui/modals/RenameModal.vue';
 import SplitModal from './components/ui/modals/SplitModal.vue';
 import MergeModal from './components/ui/modals/MergeModal.vue';
-import ConflictModal from './components/ui/modals/ConflictModal.vue';
 
 // Services & Utils
-import { sharedTree, ydoc, updateSharedTreeRoot, encodeCurrentState } from './services/crdt.service.js';
+import { sharedTree, updateSharedTreeRoot, encodeCurrentState } from './services/crdt.service.js';
 import { webrtcService } from './services/webrtc.service.js';
 import { generateId, canEditNode, cloneNode, addUUIDs, removeDraftFlag } from './utils/helpers.js';
 
@@ -102,7 +91,77 @@ const selectedIds = computed(() => new Set(selectedNodes.value.map(n => n.data.i
 const renameModal = ref({ show: false, node: null, newName: '' });
 const splitModal = ref({ show: false, node: null });
 const multiMergeModal = ref({ show: false });
-const resolutionModal = ref({ show: false, conflict: null, index: null, node: null, options: [] });
+
+// Keyboard Shortcuts
+function handleGlobalKeydown(e) {
+  // 1. Escape: Must run even if an input is focused to allow canceling out of text fields
+  if (e.key === 'Escape') {
+    if (renameModal.value.show) renameModal.value.show = false;
+    else if (splitModal.value.show) splitModal.value.show = false;
+    else if (multiMergeModal.value.show) multiMergeModal.value.show = false;
+    else clearSelection();
+    
+    if (document.activeElement) document.activeElement.blur();
+    return;
+  }
+
+  // 2. Prevent triggering shortcuts when typing inside form inputs
+  const activeTag = document.activeElement?.tagName?.toLowerCase();
+  if (activeTag === 'input' || activeTag === 'textarea') return;
+
+  // 3. Delete/Backspace: Trigger node deletion
+  if (e.key === 'Delete' || e.key === 'Backspace') {
+    if (selectedNodes.value.length > 0) {
+      deleteNode();
+    }
+    return;
+  }
+
+  // 4. Ctrl+S / Cmd+S: Split exactly one node
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+    e.preventDefault(); 
+    if (selectedNodes.value.length === 1) {
+      openSplitModal();
+    }
+    return;
+  }
+
+  // 5. Ctrl+M / Cmd+M: Merge multiple nodes
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'm') {
+    e.preventDefault();
+    if (selectedNodes.value.length > 1) {
+      openMultiMergeModal();
+    }
+    return;
+  }
+
+  // 6. Ctrl+Left / Ctrl+Right (Cmd+Left / Cmd+Right): Sibling Navigation
+  if ((e.ctrlKey || e.metaKey) && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+    e.preventDefault(); 
+    
+    // We navigate based on the most recently selected node (the last one in the array)
+    if (selectedNodes.value.length >= 1) {
+      const currentNode = selectedNodes.value[selectedNodes.value.length - 1];
+      const parent = currentNode.parent;
+      
+      if (!parent || !parent.children) return;
+
+      const siblings = parent.children;
+      const currentIndex = siblings.findIndex(s => s.data.id === currentNode.data.id);
+      const targetIndex = e.key === 'ArrowLeft' ? currentIndex - 1 : currentIndex + 1;
+      
+      if (targetIndex >= 0 && targetIndex < siblings.length) {
+        const targetNode = siblings[targetIndex];
+        
+        // If Shift is held, we perform a multi-selection
+        // If not, we perform a singular selection (standard move)
+        const isMultiSelect = e.shiftKey;
+        toggleSelection(targetNode, isMultiSelect);
+      }
+    }
+    return;
+  }
+}
 
 // Keyboard Shortcuts
 function handleGlobalKeydown(e) {
@@ -181,7 +240,8 @@ onMounted(() => {
   if (!sharedTree.get('root')) {
     const baseData = JSON.parse(JSON.stringify(mechanicsData));
     addUUIDs(baseData);
-    ydoc.transact(() => { sharedTree.set('root', JSON.stringify(baseData)); });
+    // Pass the raw object through our deep-sync function instead of stringifying
+    updateSharedTreeRoot(baseData);
   }
   syncFromNetwork(); 
   window.addEventListener('keydown', handleGlobalKeydown);
@@ -210,7 +270,6 @@ function handleNodeMoved({ draggedNode, targetNode }) {
   if (!targetData.children) targetData.children = [];
   targetData.children.push(ghostNode);
 
-  sourceData.action = 'pending-move';
   if (!sourceData.conflicts) sourceData.conflicts = [];
   
   sourceData.conflicts.push({
@@ -266,14 +325,11 @@ function openRenameModal() {
 function submitRename(newName) {
   const n = renameModal.value.node;
   if (newName && newName !== n.name) { 
-    if (n.action && n.lastEditedBy !== netState.username) {
-      if (!n.conflicts) n.conflicts = [];
-      n.conflicts.push({ id: generateId(), type: 'rename', value: newName, by: netState.username });
-    } else {
-      n.name = newName; 
-      if (n.action !== 'added') n.action = 'renamed'; 
-      n.lastEditedBy = netState.username;
-    }
+    if (!n.conflicts) n.conflicts = [];
+    
+    // Never mutate n.name directly. 
+    n.conflicts.push({ id: generateId(), type: 'rename', value: newName, by: netState.username });
+    
     if (isDraftMode.value) n._isDraft = true; 
     applyChange(); 
   }
@@ -285,25 +341,12 @@ function deleteNode() {
     if (n.depth === 0) return alert("Cannot delete root node."); 
     if (!canEditNode(n.data, netState.peerId)) return;
     
-    if (n.data.action && n.data.lastEditedBy !== netState.username) {
-      if (!n.data.conflicts) n.data.conflicts = [];
-      n.data.conflicts.push({ id: generateId(), type: 'delete', by: netState.username });
-    } else {
-      n.data.action = 'deleted';
-      n.data.lastEditedBy = netState.username;
-    }
+    if (!n.data.conflicts) n.data.conflicts = [];
+    
+    // Defer physical deletion to the resolution matrix
+    n.data.conflicts.push({ id: generateId(), type: 'delete', by: netState.username });
+    
     if (isDraftMode.value) n.data._isDraft = true;
-  });
-  selectedNodes.value = []; 
-  applyChange();
-}
-
-function permanentlyDeleteNode() {
-  selectedNodes.value.forEach(n => {
-    if (!n.parent) return; 
-    const parentData = n.parent.data;
-    const idx = parentData.children.findIndex(c => c.id === n.data.id);
-    if (idx > -1) parentData.children.splice(idx, 1);
   });
   selectedNodes.value = []; 
   applyChange();
@@ -311,18 +354,21 @@ function permanentlyDeleteNode() {
 
 function restoreNode() {
   selectedNodes.value.forEach(n => {
-    delete n.data.action;
+    // 1. Clear the legacy base action if it was marked as deleted
+    if (n.data.action === 'deleted') {
+      delete n.data.action;
+    }
+    
+    // 2. Target and remove ONLY the atomic delete proposals
+    if (n.data.conflicts) {
+      n.data.conflicts = n.data.conflicts.filter(c => c.type !== 'delete');
+    }
+    
+    // 3. Clean up UI state flags
     delete n.data.lastEditedBy;
     if (isDraftMode.value) n.data._isDraft = true;
   });
-  applyChange();
-}
-
-function approveCurrentChange() {
-  const n = selectedNodes.value[0].data;
-  delete n.action;
-  delete n.lastEditedBy;
-  if (isDraftMode.value) n._isDraft = true;
+  
   applyChange();
 }
 
@@ -354,7 +400,6 @@ function confirmSplit(payload) {
     parentData.children.push(ghost);
   });
 
-  nodeData.action = 'pending-split';
   if (!nodeData.conflicts) nodeData.conflicts = [];
   
   nodeData.conflicts.push({ 
@@ -385,7 +430,6 @@ function confirmMultiMerge(newNameStr) {
 
   selectedNodes.value.forEach(d => {
     const sourceData = d.data;
-    sourceData.action = 'pending-merge'; 
     newNode.conflicts.push({
       id: generateId(), type: 'merge-proposal', sourceId: sourceData.id, sourceName: sourceData.name,
       originalTargetName: newName, proposedName: newName, by: netState.username
@@ -419,21 +463,18 @@ function acceptConflict(conflict, index) {
   const action = actionMap[conflict.type];
   if (!action) return;
 
-  resolutionModal.value = { show: false, conflict, index, node: n, options: [] };
-  executeResolution({ action });
+  executeResolution({ action }, conflict, n);
 }
 
 function acceptAllMerges() {
   const n = selectedNodes.value[0].data;
   const referenceConflict = n.conflicts.find(c => c.type === 'merge-proposal');
   if (!referenceConflict) return;
-  resolutionModal.value = { show: false, conflict: referenceConflict, index: null, node: n, options: [] };
-  executeResolution({ action: 'n-merges' }); 
+  
+  executeResolution({ action: 'n-merges' }, referenceConflict, n); 
 }
 
-function executeResolution(option) {
-  const { conflict, node } = resolutionModal.value;
-  
+function executeResolution(option, conflict, node) {
   // 1. FORCE LIVE CONTEXT: Resolutions must update the shared state immediately
   const root = d3.hierarchy(liveTreeData.value);
   
@@ -446,11 +487,8 @@ function executeResolution(option) {
 
   if (!liveNode) return;
 
-  // CACHE CONFLICTS FIRST
-  // If we purge them before the merge loop, we destroy the data needed to delete sources and build history.
   const cachedConflicts = liveNode.conflicts ? [...liveNode.conflicts] : [];
 
-  // 2. CONFLICT PURGING: Choosing one path invalidates all other pending proposals on this node
   liveNode.conflicts = [];
   delete liveNode.action;
 
@@ -469,15 +507,12 @@ function executeResolution(option) {
   else if (act === 'move-node') {
     const targetParent = root.descendants().find(n => n.data.id === conflict.targetId);
     if (targetParent && liveParent) {
-      // Physically remove from old parent
       const idx = liveParent.children.findIndex(c => c.id === liveNode.id);
       liveParent.children.splice(idx, 1);
       
-      // Physically remove the Ghost Projection from the target
       const gIdx = targetParent.data.children.findIndex(c => c.id === conflict.ghostId);
       if (gIdx > -1) targetParent.data.children.splice(gIdx, 1);
       
-      // Attach to new parent
       if (!targetParent.data.children) targetParent.data.children = [];
       targetParent.data.children.push(liveNode);
       liveNode.action = 'moved';
@@ -496,16 +531,13 @@ function executeResolution(option) {
     const historicalSplitTree = { name: liveNode.name, children: conflict.newNames.map(n => ({ name: n })) };
     
     if (!conflict.keepOriginal) {
-      // Destructive: physically remove the original node
       const idx = liveParent.children.findIndex(c => c.id === liveNode.id);
       if (idx > -1) liveParent.children.splice(idx, 1);
     } else {
-      // Non-Destructive: log history onto the surviving original node
       liveNode.splitStructure = historicalSplitTree;
       liveNode.splitFrom = liveNode.name; 
     }
 
-    // Add new siblings
     conflict.newNames.forEach(name => {
       liveParent.children.push({
         id: generateId(), name: name, action: 'added', lastEditedBy: netState.username,
@@ -516,8 +548,6 @@ function executeResolution(option) {
 
   // --- MERGE RESOLUTION ---
   else if (act.includes('merge')) {
-    // Merges must be completely atomic. Regardless of whether the user clicked 
-    //a single conflict or "Approve All", we must process ALL source nodes attached to this target.
     const mergesToProcess = cachedConflicts.filter(c => c.type === 'merge-proposal');
     
     if (!liveNode.mergedStructure) liveNode.mergedStructure = { source: { children: [] } };
@@ -532,22 +562,18 @@ function executeResolution(option) {
       });
 
       if (sourceParent && sourceData) {
-        // Log history object
         liveNode.mergedStructure.source.children.push({
           name: sourceData.name,
           children: sourceData.children ? cloneNode(sourceData, netState.username).children : []
         });
 
-        // Set the property d3.renderer.js expects for the tooltip
         liveNode.mergedFrom = liveNode.mergedFrom 
           ? `${liveNode.mergedFrom}, ${sourceData.name}` 
           : sourceData.name;
 
-        // Physically DELETE the source node from the tree
         const srcIdx = sourceParent.children.findIndex(c => c.id === mConf.sourceId);
         if (srcIdx > -1) sourceParent.children.splice(srcIdx, 1);
         
-        // Adopt children
         if (sourceData.children) {
           if (!liveNode.children) liveNode.children = [];
           sourceData.children.forEach(child => liveNode.children.push(cloneNode(child, netState.username)));
@@ -562,9 +588,7 @@ function executeResolution(option) {
 
   liveNode.lastEditedBy = netState.username;
   
-  resolutionModal.value.show = false;
-  
-  // 3. GLOBAL CLEANUP: When ALL sources are physically gone, losers will be detected
+  // 3. GLOBAL CLEANUP
   cleanupOrphanedArtifacts(); 
   
   // 4. FORCE SYNC AND REACTIVITY
@@ -574,8 +598,11 @@ function executeResolution(option) {
 // Helper to force a network broadcast regardless of current UI mode
 function forceGlobalSync() {
   const cleanLive = JSON.parse(JSON.stringify(liveTreeData.value));
+  
   removeDraftFlag(cleanLive);
-  updateSharedTreeRoot(JSON.stringify(cleanLive));
+  
+  updateSharedTreeRoot(cleanLive); 
+  
   webrtcService.sendUpdate(encodeCurrentState(), netState.isHost);
   
   if (isDraftMode.value) {
@@ -625,20 +652,7 @@ function cleanupOrphanedArtifacts() {
   }
   
   traverseAndClean(liveTreeData.value);
-
-  // 3. CLEAN UP DANGLING ACTIONS 
-  // Any source node that belonged to a pruned merge proposal must have its hanging action cleared
-  function clearDanglingActions(node) {
-    if (node.action === 'pending-merge' && !activeMergeSourceIds.has(node.id)) {
-      delete node.action;
-    }
-    if (node.children) {
-      node.children.forEach(clearDanglingActions);
-    }
   }
-  
-  clearDanglingActions(liveTreeData.value);
-}
 </script>
 
 <style>
