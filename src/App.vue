@@ -50,6 +50,7 @@
     <MergeModal 
       :show="multiMergeModal.show" 
       :count="selectedNodes.length" 
+      :parentOptions="multiMergeModal.parentOptions"
       @close="multiMergeModal.show = false" 
       @submit="confirmMultiMerge" 
     />
@@ -90,7 +91,7 @@ const selectedIds = computed(() => new Set(selectedNodes.value.map(n => n.data.i
 // Modal States
 const renameModal = ref({ show: false, node: null, newName: '' });
 const splitModal = ref({ show: false, node: null });
-const multiMergeModal = ref({ show: false });
+const multiMergeModal = ref({ show: false, parentOptions: [] });
 
 // Keyboard Shortcuts
 function handleGlobalKeydown(e) {
@@ -345,23 +346,90 @@ function confirmSplit(payload) {
 }
 
 function openMultiMergeModal() {
-  const firstParentId = selectedNodes.value[0].parent ? selectedNodes.value[0].parent.data.id : 'root';
-  const allShareSameParent = selectedNodes.value.every(n => (n.parent ? n.parent.data.id : 'root') === firstParentId);
-  if (!allShareSameParent) return alert("Merge rejected: Only categories with the exact same parent can be merged.");
-  multiMergeModal.value.show = true;
+  if (selectedNodes.value.length < 2) return;
+
+  // 1. Guard against Root selection
+  if (selectedNodes.value.some(n => n.depth === 0)) {
+    return alert("Merge rejected: Cannot merge the root node.");
+  }
+
+  // 2. Guard against Ancestor/Descendant collisions
+  const selectedIds = new Set(selectedNodes.value.map(n => n.data.id));
+  for (const n of selectedNodes.value) {
+    let current = n.parent;
+    while (current) {
+      if (selectedIds.has(current.data.id)) {
+        return alert("Merge rejected: Cannot merge a category with its own parent or descendant.");
+      }
+      current = current.parent;
+    }
+  }
+
+  // 3. Build valid parent targets
+  const parentMap = new Map();
+  selectedNodes.value.forEach(n => {
+    const parent = n.parent;
+    const parentId = parent ? parent.data.id : 'root';
+    const parentName = parent ? parent.data.name : 'Root';
+    
+    if (!parentMap.has(parentId)) {
+      parentMap.set(parentId, { id: parentId, name: parentName, node: parent });
+    }
+  });
+
+  multiMergeModal.value = { 
+    show: true, 
+    parentOptions: Array.from(parentMap.values()) 
+  };
 }
 
-function confirmMultiMerge(newNameStr) {
-  const targetParent = selectedNodes.value[0].parent ? selectedNodes.value[0].parent.data : activeData.value;
+function confirmMultiMerge(payload) {
+  const { newName: newNameStr, targetParentId } = payload;
   const newName = newNameStr || "Consolidated Category";
 
-  const newNode = { id: generateId(), name: newName, action: 'added', lastEditedBy: netState.username, children: [], conflicts: [] };
+  // 1. Resolve the specific target parent in the raw JSON tree
+  let targetParentData = null;
+  if (targetParentId === 'root' || targetParentId === activeData.value.id) {
+    targetParentData = activeData.value;
+  } else {
+    const findParent = (node) => {
+      if (node.id === targetParentId) return node;
+      if (node.children) {
+        for (let child of node.children) {
+          const found = findParent(child);
+          if (found) return found;
+        }
+      }
+      return null;
+    };
+    targetParentData = findParent(activeData.value);
+  }
 
+  if (!targetParentData) return alert("Merge rejected: Target parent could not be resolved.");
+
+  // 2. Scaffold the new consolidated node
+  const newNode = { 
+    id: generateId(), 
+    name: newName, 
+    action: 'added', 
+    lastEditedBy: netState.username, 
+    children: [], 
+    conflicts: [] 
+  };
+
+  // 3. Map sources and build ghost structures
   selectedNodes.value.forEach(d => {
     const sourceData = d.data;
+    
+    // The conflict lives on the new proposed node, linking back to the disparate sources
     newNode.conflicts.push({
-      id: generateId(), type: 'merge-proposal', sourceId: sourceData.id, sourceName: sourceData.name,
-      originalTargetName: newName, proposedName: newName, by: netState.username
+      id: generateId(), 
+      type: 'merge-proposal', 
+      sourceId: sourceData.id, 
+      sourceName: sourceData.name,
+      originalTargetName: newName, 
+      proposedName: newName, 
+      by: netState.username
     });
 
     if (sourceData.children) {
@@ -375,8 +443,10 @@ function confirmMultiMerge(newNameStr) {
     }
   });
 
-  if (!targetParent.children) targetParent.children = [];
-  targetParent.children.push(newNode);
+  // 4. Attach to the specifically selected parent
+  if (!targetParentData.children) targetParentData.children = [];
+  targetParentData.children.push(newNode);
+  
   selectedNodes.value = [];
   applyChange();
   multiMergeModal.value.show = false;
