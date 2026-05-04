@@ -71,13 +71,7 @@ export class TreeRenderer {
     const width = window.innerWidth;
     const height = window.innerHeight; 
     
-    // Filter out nodes marked as 'deleted' if the toggle is off
-    const childrenAccessor = (d) => {
-      if (!d.children) return null;
-      return d.children.filter(c => this.ctx.showDeleted || c.action !== 'deleted');
-    };
-    
-    const root = d3.hierarchy(treeData, childrenAccessor);
+    const root = d3.hierarchy(treeData);
 
     const treeLayout = d3.tree().nodeSize([NODE_DIMENSIONS.width + 15, NODE_DIMENSIONS.height + 40]);
     treeLayout(root);
@@ -220,13 +214,7 @@ export class TreeRenderer {
     this.nodeElements.clear();
     this.linkElements.clear();
     
-    // Filter out nodes marked as 'deleted' if the toggle is off
-    const childrenAccessor = (d) => {
-      if (!d.children) return null;
-      return d.children.filter(c => this.ctx.showDeleted || c.action !== 'deleted');
-    };
-    
-    const root = d3.hierarchy(treeData, childrenAccessor);
+    const root = d3.hierarchy(treeData);
 
     const treeLayout = d3.tree()
       .nodeSize([NODE_DIMENSIONS.width + 20, NODE_DIMENSIONS.height + 40])
@@ -402,6 +390,13 @@ export class TreeRenderer {
       .attr("transform", `translate(${NODE_DIMENSIONS.width / 2 - 24}, ${-NODE_DIMENSIONS.height / 2 + 4}) scale(0.65) rotate(180, 12, 12)`)
       .style("opacity", 0).append("path").attr("d", "M14 4l2.29 2.29-2.88 2.88 1.42 1.42 2.88-2.88L20 10V4zm-4 0H4v6l2.29-2.29 4.71 4.7V20h2v-8.41l-5.29-5.3z").attr("fill", "#e91e63");
     
+    nodesEnter.append("g").attr("class", "delete-icon")
+      .attr("transform", `translate(${NODE_DIMENSIONS.width / 2 - 24}, ${-NODE_DIMENSIONS.height / 2 + 4}) scale(0.65)`)
+      .style("opacity", 0)
+      .append("path")
+      .attr("d", "M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z")
+      .attr("fill", "#f44336");
+    
     nodesEnter.append("line").attr("class", "link-bar")
       .attr("x1", -NODE_DIMENSIONS.width / 2 + 4).attr("y1", -NODE_DIMENSIONS.height / 2 + 8) 
       .attr("x2", -NODE_DIMENSIONS.width / 2 + 4).attr("y2", NODE_DIMENSIONS.height / 2 - 8)  
@@ -437,14 +432,13 @@ export class TreeRenderer {
       .style("opacity", d => d.data.isGhost ? 0.3 : 1)
       .attr("fill", d => {
         const isPendingDelete = d.data.conflicts?.some(c => c.type === 'delete');
-        const isAcceptedDelete = d.data.action === 'deleted';
-        return (isPendingDelete || isAcceptedDelete) ? "#ffebee" : "#ffffff";
+        return isPendingDelete ? "#ffebee" : "#ffffff";
       });
 
     nodesMerge.select(".node-name")
       .text(d => d.data.name)
-      .style("text-decoration", d => d.data.action === 'deleted' ? "line-through" : "none")
-      .style("fill", d => d.data.action === 'deleted' ? "#aaa" : "#333");
+      .style("text-decoration", "none")
+      .style("fill", "#333");
 
     nodesMerge.select(".conflict-text").text(d => {
       if (!d.data.conflicts?.length) return "";
@@ -465,6 +459,7 @@ export class TreeRenderer {
 
     nodesMerge.select(".merge-icon").style("opacity", d => d.data.mergedFrom ? 1 : 0);
     nodesMerge.select(".split-icon").style("opacity", d => d.data.splitFrom ? 1 : 0);
+    nodesMerge.select(".delete-icon").style("opacity", d => d.data.deletedChildren?.length ? 1 : 0);
 
     nodesMerge.select(".user-label")
       .attr("dy", d => {

@@ -11,17 +11,6 @@
           <path d="M2 12h2"></path><path d="M20 12h2"></path>
         </svg>
       </button>
-      
-      <button class="icon-btn" @click="toggleDeleted" :title="showDeleted ? 'Hide Deleted Nodes' : 'Show Deleted Nodes'" :class="{ 'active': showDeleted }">
-        <svg v-if="showDeleted" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-          <circle cx="12" cy="12" r="3"></circle>
-        </svg>
-        <svg v-else width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
-          <line x1="1" y1="1" x2="23" y2="23"></line>
-        </svg>
-      </button>
     </div>
     <svg ref="svgRef" width="100%" height="100%" @dblclick.self="handleCanvasDoubleClick"></svg>
     
@@ -96,6 +85,26 @@ function handleHover({ event, d }) {
       </div>
     `;
     mergeTooltip.value = { show: true, x: event.pageX + 20, y: event.pageY + 20, html: treeHtml };
+  } else if (d.data.deletedChildren && d.data.deletedChildren.length > 0) {
+    // Deletion History Tooltip
+    const generateHtml = (node) => {
+      let str = `<li>${node.name}</li>`;
+      if (node.children && node.children.length) {
+        str += `<ul>${node.children.map(generateHtml).join('')}</ul>`;
+      }
+      return str;
+    };
+
+    const treeHtml = `
+      <div style="color: #f44336; font-weight: bold; margin-bottom: 12px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #e0e0e0; padding-bottom: 4px;">
+        Deletion History
+      </div>
+      <div>
+        <div style="font-size: 10px; color: #5f6368; text-transform: uppercase; margin-bottom: 4px;">Removed Categories</div>
+        <ul>${d.data.deletedChildren.map(generateHtml).join('')}</ul>
+      </div>
+    `;
+    mergeTooltip.value = { show: true, x: event.pageX + 20, y: event.pageY + 20, html: treeHtml };
   }
 }
 
@@ -124,20 +133,31 @@ onMounted(() => {
     onHoverLeave: handleHoverLeave
   });
   
-  // Disable D3's default double-click-to-zoom to free up the interaction for node creation
   d3.select(svgRef.value).on("dblclick.zoom", null);
-  
+
   window.addEventListener('mousemove', handleMouseMove);
 
   renderer.updateContext({
     isDraftMode: props.isDraftMode,
     localPeerId: props.localPeerId,
-    selectedIds: props.selectedIds,
-    showDeleted: showDeleted.value
+    selectedIds: props.selectedIds
   });
 
   if (props.treeData) renderer.render(props.treeData);
 });
+
+// ... (keep the other watch hooks exactly as they are)
+
+watch(() => [props.isDraftMode, props.localPeerId, props.selectedIds], () => {
+  if (renderer) {
+    renderer.updateContext({
+      isDraftMode: props.isDraftMode,
+      localPeerId: props.localPeerId,
+      selectedIds: props.selectedIds
+    });
+    renderer.render(props.treeData);
+  }
+}, { deep: true });
 
 onUnmounted(() => {
   window.removeEventListener('mousemove', handleMouseMove);

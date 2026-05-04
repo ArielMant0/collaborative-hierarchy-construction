@@ -538,16 +538,28 @@ function executeResolution(option, conflict, node) {
 
   // --- DELETE RESOLUTION ---
   if (act === 'delete-node') {
+    // 1. Capture the historical structure before destroying the node
+    const deletedStructure = {
+      name: liveNode.name,
+      children: liveNode.children ? JSON.parse(JSON.stringify(liveNode.children)) : []
+    };
+
     if (!liveParent) {
-      // Root Node Deletion: Wrap the remaining children in a synthetic System Root
+      // Root Node Deletion: Swap to Canvas Root and store history on the floor
       liveTreeData.value = {
         id: generateId(),
         name: "Canvas Root",
         isSystemRoot: true,
-        children: liveNode.children ? [...liveNode.children] : []
+        children: [],
+        deletedChildren: [deletedStructure]
       };
     } else {
-      liveNode.action = 'deleted';
+      // Standard Deletion: Append history to parent and sever the child
+      if (!liveParent.deletedChildren) liveParent.deletedChildren = [];
+      liveParent.deletedChildren.push(deletedStructure);
+
+      const idx = liveParent.children.findIndex(c => c.id === liveNode.id);
+      if (idx > -1) liveParent.children.splice(idx, 1);
     }
   }
 
