@@ -24,6 +24,7 @@
       :selectedNodes="selectedNodes"
       :isSingleLeafSelected="isSingleLeafSelected"
       :localPeerId="netState.peerId"
+      :contextConflicts="contextConflicts"
       @rename="openRenameModal"
       @addChild="addChild"
       @split="openSplitModal"
@@ -31,8 +32,8 @@
       @delete="deleteNode"
       @restore="restoreNode"
       @multiMerge="openMultiMergeModal"
-      @acceptAllMerges="acceptAllMerges"
-      @acceptConflict="(payload) => acceptConflict(payload.conflict, payload.index)"
+      @acceptAllMerges="(hostId) => acceptAllMerges(hostId)"
+      @acceptConflict="acceptConflict"
     />
 
     <RenameModal 
@@ -89,6 +90,35 @@ const { isDraftMode, liveTreeData, draftTreeData, activeData, switchMode, applyC
 const { selectedNodes, isSingleLeafSelected, clearSelection, toggleSelection } = useSelection();
 
 const selectedIds = computed(() => new Set(selectedNodes.value.map(n => n.data.id)));
+
+// Scans the tree for conflicts hosted elsewhere that involve the selected node
+const contextConflicts = computed(() => {
+  if (selectedNodes.value.length !== 1 || !activeData.value) return [];
+  const selectedId = selectedNodes.value[0].data.id;
+  const conflicts = [];
+  
+  const root = d3.hierarchy(activeData.value);
+  root.each(n => {
+    if (n.data.conflicts) {
+      n.data.conflicts.forEach(c => {
+        let isRelevant = false;
+        // 1. Direct conflict (hosted directly on the selected node)
+        if (n.data.id === selectedId) isRelevant = true;
+        // 2. Indirect Merge Source (selected node is being merged)
+        else if (c.type === 'merge-proposal' && c.sourceId === selectedId) isRelevant = true;
+        // 3. Indirect Split Target (selected node is a new split category)
+        else if (c.type === 'split-proposal' && c.ghostIds?.includes(selectedId)) isRelevant = true;
+        // 4. Indirect Move Target (selected node is a proposed move destination)
+        else if (c.type === 'move-proposal' && c.ghostId === selectedId) isRelevant = true;
+
+        if (isRelevant) {
+          conflicts.push({ conflict: c, hostNodeId: n.data.id });
+        }
+      });
+    }
+  });
+  return conflicts;
+});
 
 // Modal States
 const renameModal = ref({ show: false, node: null, newName: '' });
@@ -496,8 +526,18 @@ function confirmMultiMerge(payload) {
 }
 
 // 5. Conflict Resolution Matrix
-function acceptConflict(conflict, index) {
-  const n = selectedNodes.value[0].data;
+function acceptConflict(payload) {
+  const { conflict, hostNodeId } = payload;
+  
+  // Find the exact node that physically holds the conflict array
+  let hostNode = null;
+  d3.hierarchy(liveTreeData.value).each(n => {
+    if (n.data.id === hostNodeId) hostNode = n.data;
+  });
+  
+  if (!hostNode) return;
+  if (!canEditNode(hostNode, netState.peerId)) return alert("Action rejected: The target node is locked by another user.");
+
   const actionMap = {
     'delete': 'delete-node', 'rename': 'rename-node', 'move-proposal': 'move-node',
     'split-proposal': 'split-replace', 'merge-proposal': 'merge-node'
@@ -505,15 +545,22 @@ function acceptConflict(conflict, index) {
   const action = actionMap[conflict.type];
   if (!action) return;
 
-  executeResolution({ action }, conflict, n);
+  executeResolution({ action }, conflict, hostNode);
 }
 
-function acceptAllMerges() {
-  const n = selectedNodes.value[0].data;
-  const referenceConflict = n.conflicts.find(c => c.type === 'merge-proposal');
+function acceptAllMerges(hostNodeId) {
+  let hostNode = null;
+  d3.hierarchy(liveTreeData.value).each(n => {
+    if (n.data.id === hostNodeId) hostNode = n.data;
+  });
+  
+  if (!hostNode) return;
+  if (!canEditNode(hostNode, netState.peerId)) return alert("Action rejected: The target node is locked by another user.");
+
+  const referenceConflict = hostNode.conflicts?.find(c => c.type === 'merge-proposal');
   if (!referenceConflict) return;
   
-  executeResolution({ action: 'n-merges' }, referenceConflict, n); 
+  executeResolution({ action: 'n-merges' }, referenceConflict, hostNode); 
 }
 
 function executeResolution(option, conflict, node) {

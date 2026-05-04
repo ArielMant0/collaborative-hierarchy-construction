@@ -18,26 +18,27 @@
         <button v-if="selectedNodes[0].data.conflicts?.some(c => c.type === 'delete')" class="sleek-btn outline" :disabled="isLocked" :style="disabledActionStyle" @click="$emit('restore')">Restore Node</button>
         <button v-else class="sleek-btn outline" :disabled="isLocked" :style="[disabledActionStyle, !isLocked ? { color: '#f44336', borderColor: '#f44336' } : {}]" @click="$emit('delete')">Delete</button>
         
-        <template v-if="selectedNodes[0].data.conflicts?.length">
+        <!-- Use Context-Aware Conflicts instead of local node conflicts -->
+        <template v-if="contextConflicts.length">
           <div class="divider"></div>
           
           <button 
-            v-if="selectedNodes[0].data.conflicts.filter(c => c.type === 'merge-proposal').length > 1"
+            v-if="contextConflicts.filter(c => c.conflict.type === 'merge-proposal').length > 1"
             class="sleek-btn primary" 
             :disabled="isLocked"
             :style="[disabledActionStyle, !isLocked ? { background: '#ff9800' } : {}]"
-            @click="$emit('acceptAllMerges')">
+            @click="$emit('acceptAllMerges', contextConflicts.find(c => c.conflict.type === 'merge-proposal').hostNodeId)">
             Accept All Merges
           </button>
 
-          <template v-for="(conflict, index) in selectedNodes[0].data.conflicts" :key="conflict.id">
+          <template v-for="item in contextConflicts" :key="item.conflict.id">
             <button 
-              v-if="!(conflict.type === 'merge-proposal' && selectedNodes[0].data.conflicts.filter(c => c.type === 'merge-proposal').length > 1)"
+              v-if="!(item.conflict.type === 'merge-proposal' && contextConflicts.filter(c => c.conflict.type === 'merge-proposal').length > 1)"
               class="sleek-btn primary" 
               :disabled="isLocked"
               :style="[disabledActionStyle, !isLocked ? { background: '#ff9800' } : {}]"
-              @click="$emit('acceptConflict', { conflict, index })">
-              {{ getConflictButtonLabel(conflict) }}
+              @click="$emit('acceptConflict', { conflict: item.conflict, hostNodeId: item.hostNodeId })">
+              {{ getConflictButtonLabel(item.conflict) }}
             </button>
           </template>
         </template>
@@ -69,7 +70,8 @@ import { computed } from 'vue';
 const props = defineProps({
   selectedNodes: Array,
   isSingleLeafSelected: Boolean,
-  localPeerId: String
+  localPeerId: String,
+  contextConflicts: { type: Array, default: () => [] } 
 });
 
 defineEmits([
