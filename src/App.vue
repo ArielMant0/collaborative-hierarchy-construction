@@ -17,6 +17,7 @@
       :selectedIds="selectedIds"
       @node-selected="(payload) => toggleSelection(payload.d, payload.event.ctrlKey || payload.event.metaKey)"
       @node-moved="handleNodeMoved"
+      @add-floating-node="addFloatingNode"
     />
 
     <Toolbox 
@@ -100,8 +101,7 @@ function handleGlobalKeydown(e) {
     if (renameModal.value.show) renameModal.value.show = false;
     else if (splitModal.value.show) splitModal.value.show = false;
     else if (multiMergeModal.value.show) multiMergeModal.value.show = false;
-    else if (resolutionModal.value.show) resolutionModal.value.show = false;
-    else clearSelection();
+    else clearSelection(); 
     
     if (document.activeElement) document.activeElement.blur();
     return;
@@ -268,7 +268,7 @@ function submitRename(newName) {
 
 function deleteNode() {
   selectedNodes.value.forEach(n => {
-    if (n.depth === 0) return alert("Cannot delete root node."); 
+
     if (!canEditNode(n.data, netState.peerId)) return;
     
     if (!n.data.conflicts) n.data.conflicts = [];
@@ -302,10 +302,39 @@ function restoreNode() {
   applyChange();
 }
 
+function addFloatingNode() {
+  const newNode = {
+    id: generateId(),
+    name: "New Floating Concept",
+    action: 'added',
+    lastEditedBy: netState.username,
+    _isDraft: isDraftMode.value ? true : undefined,
+  };
+
+  // 1. If the canvas is still a strict top-down tree, automatically transition it into a Forest
+  if (!activeData.value.isSystemRoot) {
+    const legacyRoot = JSON.parse(JSON.stringify(activeData.value));
+    
+    // Wipe the reactive object without destroying the memory reference Vue relies on
+    for (let key in activeData.value) delete activeData.value[key];
+    
+    activeData.value.id = generateId();
+    activeData.value.name = "Canvas Root";
+    activeData.value.isSystemRoot = true;
+    activeData.value.children = [legacyRoot, newNode];
+  } else {
+    // 2. We already have an invisible canvas floor, just append the new node
+    if (!activeData.value.children) activeData.value.children = [];
+    activeData.value.children.push(newNode);
+  }
+  
+  applyChange();
+}
+
 // 4. Split & Merge Engine
 function openSplitModal() {
   const n = selectedNodes.value[0];
-  if (n.depth === 0) return alert("Cannot split root node.");
+
   splitModal.value = { show: true, node: n };
 }
 
@@ -313,7 +342,7 @@ function confirmSplit(payload) {
   const { names: newNamesString, keepOriginal } = payload;
   const d3Node = splitModal.value.node;
   const nodeData = d3Node.data;
-  const parentData = d3Node.parent.data;
+  const parentData = d3Node.parent?.data; // Safe access for root
   const names = newNamesString.split(',').map(n => n.trim()).filter(n => n);
   
   // If keeping original, 1 new name is a valid split. Otherwise, need at least 2.
@@ -323,11 +352,16 @@ function confirmSplit(payload) {
 
   const ghostIds = [];
 
-  if (!parentData.children) parentData.children = [];
   names.forEach(name => {
     const ghost = { id: generateId(), name: name, isGhost: true, action: 'added', lastEditedBy: netState.username };
     ghostIds.push(ghost.id);
-    parentData.children.push(ghost);
+    
+    // Only inject ghosts visually if a parent exists. 
+    // Root splits defer structural shifts entirely to the execution matrix.
+    if (parentData) {
+      if (!parentData.children) parentData.children = [];
+      parentData.children.push(ghost);
+    }
   });
 
   if (!nodeData.conflicts) nodeData.conflicts = [];
@@ -348,12 +382,7 @@ function confirmSplit(payload) {
 function openMultiMergeModal() {
   if (selectedNodes.value.length < 2) return;
 
-  // 1. Guard against Root selection
-  if (selectedNodes.value.some(n => n.depth === 0)) {
-    return alert("Merge rejected: Cannot merge the root node.");
-  }
-
-  // 2. Guard against Ancestor/Descendant collisions
+  // 1. Guard against Ancestor/Descendant collisions
   const selectedIds = new Set(selectedNodes.value.map(n => n.data.id));
   for (const n of selectedNodes.value) {
     let current = n.parent;
@@ -365,7 +394,7 @@ function openMultiMergeModal() {
     }
   }
 
-  // 3. Build valid parent targets
+  // 2. Build valid parent targets
   const parentMap = new Map();
   selectedNodes.value.forEach(n => {
     const parent = n.parent;
@@ -494,7 +523,19 @@ function executeResolution(option, conflict, node) {
   const act = option.action;
 
   // --- DELETE RESOLUTION ---
-  if (act === 'delete-node') liveNode.action = 'deleted';
+  if (act === 'delete-node') {
+    if (!liveParent) {
+      // Root Node Deletion: Wrap the remaining children in a synthetic System Root
+      liveTreeData.value = {
+        id: generateId(),
+        name: "Canvas Root",
+        isSystemRoot: true,
+        children: liveNode.children ? [...liveNode.children] : []
+      };
+    } else {
+      liveNode.action = 'deleted';
+    }
+  }
 
   // --- RENAME RESOLUTION ---
   else if (act === 'rename-node') {
@@ -520,25 +561,39 @@ function executeResolution(option, conflict, node) {
 
   // --- SPLIT RESOLUTION ---
   else if (act.startsWith('split')) {
-    if (conflict.ghostIds && liveParent) {
+    let targetParent = liveParent;
+
+    // Root Split Interception
+    if (!targetParent) {
+      targetParent = {
+        id: generateId(),
+        name: "Canvas Root",
+        isSystemRoot: true,
+        children: []
+      };
+      liveTreeData.value = targetParent;
+    }
+
+    if (conflict.ghostIds && targetParent.children) {
       conflict.ghostIds.forEach(gId => {
-        const gIdx = liveParent.children.findIndex(c => c.id === gId);
-        if (gIdx > -1) liveParent.children.splice(gIdx, 1);
+        const gIdx = targetParent.children.findIndex(c => c.id === gId);
+        if (gIdx > -1) targetParent.children.splice(gIdx, 1);
       });
     }
     
     const historicalSplitTree = { name: liveNode.name, children: conflict.newNames.map(n => ({ name: n })) };
     
     if (!conflict.keepOriginal) {
-      const idx = liveParent.children.findIndex(c => c.id === liveNode.id);
-      if (idx > -1) liveParent.children.splice(idx, 1);
+      const idx = targetParent.children.findIndex(c => c.id === liveNode.id);
+      if (idx > -1) targetParent.children.splice(idx, 1);
     } else {
       liveNode.splitStructure = historicalSplitTree;
       liveNode.splitFrom = liveNode.name; 
+      if (!liveParent) targetParent.children.push(liveNode); // Explicitly attach if we made a new root
     }
 
     conflict.newNames.forEach(name => {
-      liveParent.children.push({
+      targetParent.children.push({
         id: generateId(), name: name, action: 'added', lastEditedBy: netState.username,
         splitFrom: liveNode.name, splitStructure: historicalSplitTree
       });

@@ -352,6 +352,7 @@ export class TreeRenderer {
     
     linksMerge.transition(t)
       .attr("stroke", d => {
+        if (d.source.data.isSystemRoot) return "transparent"; // Sever visual anchor
         if (d.target.data.isGhost) return COLORS.linkDefault;
         if (d.target.data.action === 'moved') return ACTION_COLORS.moved;
         if (d.target.data.action === 'added') return ACTION_COLORS.added; 
@@ -359,8 +360,9 @@ export class TreeRenderer {
       })
       .attr("stroke-width", 2)
       .attr("stroke-dasharray", "none") 
+      .style("opacity", d => d.source.data.isSystemRoot ? 0 : 1) // Guarantee invisibility
       .attr("d", edgeLinkGen);
-    
+
     linksMerge.each((d, i, nodes) => { this.linkElements.set(d.target, d3.select(nodes[i])); });
 
     // --- 4. Nodes ---
@@ -411,9 +413,21 @@ export class TreeRenderer {
     nodesEnter.append("text").attr("class", "user-label").attr("dy", 18).attr("text-anchor", "middle").style("font-size", "8px");
 
     const nodesMerge = nodesEnter.merge(nodesData);
-    nodesMerge.transition(t).attr("transform", d => `translate(${d.x},${d.y})`);
-    nodesMerge.style("cursor", d => canEditNode(d.data, this.ctx.localPeerId) ? "grab" : "not-allowed");
+    
+    // 1. Cloak the group during the transform transition
+    nodesMerge.transition(t)
+      .attr("transform", d => `translate(${d.x},${d.y})`)
+      .style("opacity", d => d.data.isSystemRoot ? 0 : 1);
 
+    // 2. Disable all physics/mouse interactions for the phantom root
+    nodesMerge.style("pointer-events", d => d.data.isSystemRoot ? "none" : "all");
+    
+    nodesMerge.style("cursor", d => {
+      if (d.data.isSystemRoot) return "default";
+      return canEditNode(d.data, this.ctx.localPeerId) ? "grab" : "not-allowed";
+    });
+
+    // 3. Standard node styling
     nodesMerge.select("rect")
       .attr("stroke", d => this.ctx.selectedIds.has(d.data.id) ? "#1a73e8" : this.getStrokeColor(d.data))
       .attr("stroke-width", d => {
@@ -421,7 +435,6 @@ export class TreeRenderer {
         return (d.data.locked || d.data.action || d.data.conflicts?.length || (this.ctx.isDraftMode && d.data._isDraft)) ? 3 : 2;
       })
       .style("opacity", d => d.data.isGhost ? 0.3 : 1)
-      // Apply red tint to BOTH pending conflict proposals and accepted base actions
       .attr("fill", d => {
         const isPendingDelete = d.data.conflicts?.some(c => c.type === 'delete');
         const isAcceptedDelete = d.data.action === 'deleted';
@@ -443,8 +456,6 @@ export class TreeRenderer {
       let display = [];
       if (renames.length) display.push(`[RENAME]: ${renames.join(', ')}`);
       if (splits.length) display.push(`[SPLIT]: ${splits.join(' | ')}`);
-      
-      // Clean, concise count instead of a massive string
       if (merges.length) display.push(`[MERGING: ${merges.length}]`);
       
       return display.join(' | ');

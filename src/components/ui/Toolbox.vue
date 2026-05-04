@@ -12,7 +12,9 @@
         <button class="sleek-btn outline" @click="$emit('addChild')">Add Child</button>
         <button v-if="isSingleLeafSelected" class="sleek-btn outline" @click="$emit('split')">Split</button>
         <button class="sleek-btn outline" @click="$emit('toggleLock')">{{ selectedNodes[0].data.locked ? 'Unlock' : 'Lock' }}</button>
-        <button class="sleek-btn outline" style="color: #f44336; border-color: #f44336;" @click="$emit('delete')">Delete</button>
+        
+        <button v-if="selectedNodes[0].data.conflicts?.some(c => c.type === 'delete')" class="sleek-btn outline" @click="$emit('restore')">Restore Node</button>
+        <button v-else class="sleek-btn outline" style="color: #f44336; border-color: #f44336;" @click="$emit('delete')">Delete</button>
         
         <template v-if="selectedNodes[0].data.conflicts?.length">
           <div class="divider"></div>
@@ -47,8 +49,8 @@
       
       <div class="divider"></div>
 
-      <template v-if="selectedNodes.every(n => n.data.action === 'deleted')">
-        <button class="sleek-btn outline" @click="$emit('restore')">Restore</button>
+      <template v-if="selectedNodes.every(n => n.data.action === 'deleted' || n.data.conflicts?.some(c => c.type === 'delete'))">
+        <button class="sleek-btn outline" @click="$emit('restore')">Restore All</button>
       </template>
       <template v-else>
         <button class="sleek-btn outline" style="color: #f44336; border-color: #f44336;" @click="$emit('delete')">Delete</button>
@@ -63,7 +65,6 @@ const props = defineProps({
   isSingleLeafSelected: Boolean
 });
 
-// REMOVED: 'approveBaseChange' and 'permanentlyDelete'
 defineEmits([
   'rename', 'addChild', 'split', 'toggleLock', 'delete', 
   'restore', 'multiMerge', 

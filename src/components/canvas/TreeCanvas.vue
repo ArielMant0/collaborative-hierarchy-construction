@@ -23,7 +23,7 @@
         </svg>
       </button>
     </div>
-    <svg ref="svgRef" width="100%" height="100%"></svg>
+    <svg ref="svgRef" width="100%" height="100%" @dblclick.self="handleCanvasDoubleClick"></svg>
     
     <div v-if="mergeTooltip.show" class="merge-tooltip" :style="{ top: mergeTooltip.y + 'px', left: mergeTooltip.x + 'px' }" v-html="mergeTooltip.html"></div>
   </div>
@@ -40,7 +40,11 @@ const props = defineProps({
   selectedIds: Set
 });
 
-const emit = defineEmits(['node-selected', 'node-moved']);
+const emit = defineEmits(['node-selected', 'node-moved', 'add-floating-node']);
+
+function handleCanvasDoubleClick() {
+  emit('add-floating-node');
+}
 
 const svgRef = ref(null);
 const mergeTooltip = ref({ show: false, x: 0, y: 0, html: '' });
@@ -120,6 +124,9 @@ onMounted(() => {
     onHoverLeave: handleHoverLeave
   });
   
+  // Disable D3's default double-click-to-zoom to free up the interaction for node creation
+  d3.select(svgRef.value).on("dblclick.zoom", null);
+  
   window.addEventListener('mousemove', handleMouseMove);
 
   renderer.updateContext({
@@ -140,7 +147,7 @@ watch(() => props.treeData, (newData) => {
   if (renderer && newData) renderer.render(newData);
 }, { deep: true });
 
-watch(() => [props.isDraftMode, props.localPeerId, props.selectedIds, showDeleted.value], () => {
+watch(() => [props.isDraftMode, props.localPeerId, props.selectedIds, showDeleted.value], (newVals, oldVals) => {
   if (renderer) {
     renderer.updateContext({
       isDraftMode: props.isDraftMode,
@@ -150,8 +157,11 @@ watch(() => [props.isDraftMode, props.localPeerId, props.selectedIds, showDelete
     });
     renderer.render(props.treeData);
     
-    // snap the tree back into the center if a massive branch was just hidden
-    if (!showDeleted.value) renderer.recenter(props.treeData, true);
+    // Only snap the tree to the center if the 'showDeleted' toggle 
+    const showDeletedChanged = oldVals && oldVals[3] !== newVals[3];
+    if (showDeletedChanged && !newVals[3]) {
+      renderer.recenter(props.treeData, true);
+    }
   }
 }, { deep: true });
 </script>
