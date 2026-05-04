@@ -27,10 +27,11 @@ export function flattenTree(node, acc = []) {
 }
 
 export function canEditNode(nodeData, localPeerId) {
-  if (!nodeData) return true; 
-  if (nodeData.action === 'deleted') return false; 
-  if (!nodeData.locked) return true;
-  return nodeData.lockedBy === localPeerId;
+  if (!nodeData) return true;
+  if (nodeData.action === 'deleted') return false;
+  if (nodeData.locked) return false;
+  
+  return true;
 }
 
 export function addUUIDs(node) {

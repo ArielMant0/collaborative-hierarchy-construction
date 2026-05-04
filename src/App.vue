@@ -23,6 +23,7 @@
     <Toolbox 
       :selectedNodes="selectedNodes"
       :isSingleLeafSelected="isSingleLeafSelected"
+      :localPeerId="netState.peerId"
       @rename="openRenameModal"
       @addChild="addChild"
       @split="openSplitModal"
@@ -188,6 +189,11 @@ function handleNodeMoved({ draggedNode, targetNode }) {
   const sourceData = draggedNode.data;
   const targetData = targetNode.data;
 
+  // Ensure neither the source nor the target is locked by someone else
+  if (!canEditNode(sourceData, netState.peerId) || !canEditNode(targetData, netState.peerId)) {
+    return alert("Move rejected: Node is locked by another user.");
+  }
+
   const ghostId = generateId();
   const ghostNode = {
     ...cloneNode(sourceData, netState.username),
@@ -335,6 +341,9 @@ function addFloatingNode() {
 function openSplitModal() {
   const n = selectedNodes.value[0];
 
+  // Prevent splitting a locked node
+  if (!canEditNode(n.data, netState.peerId)) return alert("Node is locked!");
+
   splitModal.value = { show: true, node: n };
 }
 
@@ -381,6 +390,11 @@ function confirmSplit(payload) {
 
 function openMultiMergeModal() {
   if (selectedNodes.value.length < 2) return;
+
+  // Ensure no locked nodes are included in a merge
+  if (selectedNodes.value.some(n => !canEditNode(n.data, netState.peerId))) {
+    return alert("Merge rejected: One or more selected nodes are locked.");
+  }
 
   // 1. Guard against Ancestor/Descendant collisions
   const selectedIds = new Set(selectedNodes.value.map(n => n.data.id));
