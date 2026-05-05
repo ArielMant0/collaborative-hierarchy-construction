@@ -22,24 +22,40 @@
         <template v-if="displayableConflicts.length">
           <div class="divider"></div>
           
-          <button 
-            v-if="hasLocalMultipleMerges"
-            class="sleek-btn primary" 
-            :disabled="isLocked"
-            :style="[disabledActionStyle, !isLocked ? { background: '#ff9800' } : {}]"
-            @click="$emit('acceptAllMerges', selectedNodes[0].data.id)">
-            Accept All Merges
-          </button>
-
-          <template v-for="item in displayableConflicts" :key="item.conflict.id">
+          <div v-if="hasLocalMultipleMerges" style="display: flex; gap: 4px;">
             <button 
-              v-if="!(item.conflict.type === 'merge-proposal' && item.hostNodeId === selectedNodes[0].data.id && hasLocalMultipleMerges)"
               class="sleek-btn primary" 
               :disabled="isLocked"
               :style="[disabledActionStyle, !isLocked ? { background: '#ff9800' } : {}]"
-              @click="$emit('acceptConflict', { conflict: item.conflict, hostNodeId: item.hostNodeId })">
-              {{ getConflictButtonLabel(item.conflict) }}
+              @click="$emit('acceptAllMerges', selectedNodes[0].data.id)">
+              Accept All Merges
             </button>
+            <button 
+              class="sleek-btn outline" 
+              :disabled="isLocked"
+              :style="[disabledActionStyle, !isLocked ? { color: '#f44336', borderColor: '#f44336' } : {}]"
+              @click="$emit('discardAllMerges', selectedNodes[0].data.id)">
+              Discard All
+            </button>
+          </div>
+
+          <template v-for="item in displayableConflicts" :key="item.conflict.id">
+            <div v-if="!(item.conflict.type === 'merge-proposal' && item.hostNodeId === selectedNodes[0].data.id && hasLocalMultipleMerges)" style="display: flex; gap: 4px;">
+              <button 
+                class="sleek-btn primary" 
+                :disabled="isLocked"
+                :style="[disabledActionStyle, !isLocked ? { background: '#ff9800' } : {}]"
+                @click="$emit('acceptConflict', { conflict: item.conflict, hostNodeId: item.hostNodeId })">
+                {{ getConflictButtonLabel(item.conflict) }}
+              </button>
+              <button 
+                class="sleek-btn outline" 
+                :disabled="isLocked"
+                :style="[disabledActionStyle, !isLocked ? { color: '#f44336', borderColor: '#f44336' } : {}]"
+                @click="$emit('discardConflict', { conflict: item.conflict, hostNodeId: item.hostNodeId })">
+                Discard
+              </button>
+            </div>
           </template>
         </template>
       </template>
@@ -77,7 +93,8 @@ const props = defineProps({
 defineEmits([
   'rename', 'addChild', 'split', 'toggleLock', 'delete', 
   'restore', 'multiMerge', 
-  'acceptAllMerges', 'acceptConflict'
+  'acceptAllMerges', 'acceptConflict',
+  'discardAllMerges', 'discardConflict' 
 ]);
 
 // 1. Is ANY selected node locked? 

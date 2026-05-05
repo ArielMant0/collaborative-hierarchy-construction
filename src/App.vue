@@ -34,6 +34,8 @@
       @multiMerge="openMultiMergeModal"
       @acceptAllMerges="(hostId) => acceptAllMerges(hostId)"
       @acceptConflict="acceptConflict"
+      @discardAllMerges="(hostId) => discardAllMerges(hostId)" 
+      @discardConflict="discardConflict" 
     />
 
     <RenameModal 
@@ -562,6 +564,45 @@ function acceptAllMerges(hostNodeId) {
   if (!referenceConflict) return;
   
   executeResolution({ action: 'n-merges' }, referenceConflict, hostNode); 
+}
+
+function discardConflict(payload) {
+  const { conflict, hostNodeId } = payload;
+  
+  let hostNode = null;
+  d3.hierarchy(liveTreeData.value).each(n => {
+    if (n.data.id === hostNodeId) hostNode = n.data;
+  });
+  
+  if (!hostNode) return;
+  if (!canEditNode(hostNode, netState.peerId)) return alert("Action rejected: The target node is locked.");
+
+  // Remove the specific atomic proposal
+  if (hostNode.conflicts) {
+    hostNode.conflicts = hostNode.conflicts.filter(c => c.id !== conflict.id);
+  }
+
+  // Trigger GC to automatically destroy any ghost UI nodes that belonged to this proposal
+  cleanupOrphanedArtifacts(); 
+  forceGlobalSync();
+}
+
+function discardAllMerges(hostNodeId) {
+  let hostNode = null;
+  d3.hierarchy(liveTreeData.value).each(n => {
+    if (n.data.id === hostNodeId) hostNode = n.data;
+  });
+  
+  if (!hostNode) return;
+  if (!canEditNode(hostNode, netState.peerId)) return alert("Action rejected: The target node is locked.");
+
+  // Wipe all merge proposals hosted here
+  if (hostNode.conflicts) {
+    hostNode.conflicts = hostNode.conflicts.filter(c => c.type !== 'merge-proposal');
+  }
+
+  cleanupOrphanedArtifacts(); 
+  forceGlobalSync();
 }
 
 function executeResolution(option, conflict, node) {
