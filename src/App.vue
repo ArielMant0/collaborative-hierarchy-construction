@@ -243,6 +243,7 @@ function handleNodeMoved({ draggedNode, targetNode }) {
     type: 'move-proposal',
     ghostId: ghostId,
     targetId: targetData.id,
+    targetName: targetData.name, // Capture the visual name of the destination
     by: netState.username
   });
 

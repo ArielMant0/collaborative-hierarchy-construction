@@ -19,21 +19,21 @@
         <button v-else class="sleek-btn outline" :disabled="isLocked" :style="[disabledActionStyle, !isLocked ? { color: '#f44336', borderColor: '#f44336' } : {}]" @click="$emit('delete')">Delete</button>
         
         <!-- Use Context-Aware Conflicts instead of local node conflicts -->
-        <template v-if="contextConflicts.length">
+        <template v-if="displayableConflicts.length">
           <div class="divider"></div>
           
           <button 
-            v-if="contextConflicts.filter(c => c.conflict.type === 'merge-proposal').length > 1"
+            v-if="hasLocalMultipleMerges"
             class="sleek-btn primary" 
             :disabled="isLocked"
             :style="[disabledActionStyle, !isLocked ? { background: '#ff9800' } : {}]"
-            @click="$emit('acceptAllMerges', contextConflicts.find(c => c.conflict.type === 'merge-proposal').hostNodeId)">
+            @click="$emit('acceptAllMerges', selectedNodes[0].data.id)">
             Accept All Merges
           </button>
 
-          <template v-for="item in contextConflicts" :key="item.conflict.id">
+          <template v-for="item in displayableConflicts" :key="item.conflict.id">
             <button 
-              v-if="!(item.conflict.type === 'merge-proposal' && contextConflicts.filter(c => c.conflict.type === 'merge-proposal').length > 1)"
+              v-if="!(item.conflict.type === 'merge-proposal' && item.hostNodeId === selectedNodes[0].data.id && hasLocalMultipleMerges)"
               class="sleek-btn primary" 
               :disabled="isLocked"
               :style="[disabledActionStyle, !isLocked ? { background: '#ff9800' } : {}]"
@@ -93,7 +93,19 @@ const canUnlock = computed(() => {
   return n.locked && n.lockedBy === props.localPeerId;
 });
 
-// 3. Styling definitions
+// 3. Pass all conflicts through. Deletions MUST remain visible to trigger the resolution matrix.
+const displayableConflicts = computed(() => {
+  return props.contextConflicts;
+});
+
+// 4. Strictly verify that the selected node is the ACTUAL host of the merges
+const hasLocalMultipleMerges = computed(() => {
+  if (!props.selectedNodes || props.selectedNodes.length !== 1) return false;
+  const selectedId = props.selectedNodes[0].data.id;
+  return displayableConflicts.value.filter(c => c.conflict.type === 'merge-proposal' && c.hostNodeId === selectedId).length > 1;
+});
+
+// 5. Styling definitions
 const disabledActionStyle = computed(() => {
   return isLocked.value ? { opacity: 0.5, cursor: 'not-allowed', borderColor: '#dadce0', color: '#9aa0a6', background: 'transparent' } : {};
 });
@@ -103,10 +115,21 @@ const disabledUnlockStyle = computed(() => {
 });
 
 function getConflictButtonLabel(conflict) {
-  if (conflict.type === 'split-proposal') return `Accept Split: ${conflict.newNames.join(', ')}`;
-  if (conflict.type === 'merge-proposal') return `Accept Merge: ${conflict.proposedName}`;
-  if (conflict.type === 'rename') return `Accept Rename: "${conflict.value}"`;
-  if (conflict.type === 'move-proposal') return `Accept Move`;
-  return `Accept ${conflict.type}`;
+  // Extract the author safely (fallback just in case)
+  const author = conflict.by ? ` by ${conflict.by}` : '';
+
+  if (conflict.type === 'split-proposal') return `Accept Split: ${conflict.newNames.join(', ')}${author}`;
+  if (conflict.type === 'merge-proposal') return `Accept Merge: ${conflict.proposedName}${author}`;
+  if (conflict.type === 'rename') return `Accept Rename: "${conflict.value}"${author}`;
+  
+  // Utilize the new targetName metadata for moves
+  if (conflict.type === 'move-proposal') {
+    const destination = conflict.targetName ? ` to '${conflict.targetName}'` : '';
+    return `Accept Move${destination}${author}`;
+  }
+  
+  if (conflict.type === 'delete') return `Accept Deletion${author}`;
+  
+  return `Accept ${conflict.type}${author}`;
 }
 </script>
