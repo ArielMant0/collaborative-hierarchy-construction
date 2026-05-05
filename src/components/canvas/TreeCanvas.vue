@@ -21,6 +21,7 @@
 <script setup>
 import { ref, onMounted, watch, onUnmounted } from 'vue';
 import { TreeRenderer } from '../../services/d3.renderer.js';
+import * as d3 from 'd3';
 
 const props = defineProps({
   treeData: Object,
