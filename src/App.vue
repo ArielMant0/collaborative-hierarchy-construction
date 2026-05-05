@@ -579,7 +579,13 @@ function executeResolution(option, conflict, node) {
 
   const cachedConflicts = liveNode.conflicts ? [...liveNode.conflicts] : [];
 
-  liveNode.conflicts = [];
+  // Only wipe the specific conflict being resolved (or all merges if n-merges is clicked)
+  if (option.action === 'n-merges') {
+    liveNode.conflicts = cachedConflicts.filter(c => c.type !== 'merge-proposal');
+  } else {
+    liveNode.conflicts = cachedConflicts.filter(c => c.id !== conflict.id);
+  }
+  
   delete liveNode.action;
 
   const act = option.action;
@@ -676,7 +682,10 @@ function executeResolution(option, conflict, node) {
 
   // --- MERGE RESOLUTION ---
   else if (act.includes('merge')) {
-    const mergesToProcess = cachedConflicts.filter(c => c.type === 'merge-proposal');
+    // Process all merges only if n-merges, otherwise process the specifically accepted one
+    const mergesToProcess = act === 'n-merges' 
+      ? cachedConflicts.filter(c => c.type === 'merge-proposal')
+      : [conflict]; 
     
     if (!liveNode.mergedStructure) liveNode.mergedStructure = { source: { children: [] } };
     
@@ -764,15 +773,27 @@ function cleanupOrphanedArtifacts() {
 
       // COMPETITIVE MERGE INVALIDATION
       if (child.conflicts && child.conflicts.some(c => c.type === 'merge-proposal')) {
-        const mergeConflicts = child.conflicts.filter(c => c.type === 'merge-proposal');
+        // Evaluate merge sources individually rather than failing the whole node
+        const validConflicts = [];
         
-        // A merge proposal is ONLY valid if ALL of its source nodes still exist in the tree
-        const allSourcesStillExist = mergeConflicts.every(mc => allCurrentIds.has(mc.sourceId));
+        child.conflicts.forEach(c => {
+          if (c.type === 'merge-proposal') {
+            if (allCurrentIds.has(c.sourceId)) {
+              validConflicts.push(c);
+              activeMergeSourceIds.add(c.sourceId);
+            }
+          } else {
+            validConflicts.push(c);
+          }
+        });
         
-        if (!allSourcesStillExist) return false; 
+        child.conflicts = validConflicts;
+        const remainingMerges = child.conflicts.filter(c => c.type === 'merge-proposal');
         
-        // If the merge proposal survives, register its sources to protect their pending status
-        mergeConflicts.forEach(mc => activeMergeSourceIds.add(mc.sourceId));
+        // If the node hasn't been structurally merged yet and loses all valid sources, prune it safely
+        if (remainingMerges.length === 0 && !child.mergedStructure) {
+          return false; 
+        }
       }
       return true;
     });
