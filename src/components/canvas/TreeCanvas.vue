@@ -85,6 +85,25 @@ function handleHover({ event, d }) {
       </div>
     `;
     mergeTooltip.value = { show: true, x: event.pageX + 20, y: event.pageY + 20, html: treeHtml };
+  } else if (d.data.conflicts && d.data.conflicts.length > 0) {
+    const renames = d.data.conflicts.filter(c => c.type === 'rename');
+    const merges = d.data.conflicts.filter(c => c.type === 'merge-proposal');
+    const splits = d.data.conflicts.filter(c => c.type === 'split-proposal');
+    const deletes = d.data.conflicts.filter(c => c.type === 'delete');
+
+    let content = '';
+    if (renames.length) content += `<div style="margin-bottom:6px;"><strong style="font-size:10px;color:#ff9800;display:block;margin-bottom:2px;">RENAMES</strong>${renames.map(c => `<div style="color:#5f6368;">"${c.value}" <span style="font-size:9px;color:#888;">by ${c.by}</span></div>`).join('')}</div>`;
+    if (merges.length) content += `<div style="margin-bottom:6px;"><strong style="font-size:10px;color:#9c27b0;display:block;margin-bottom:2px;">MERGING</strong>${merges.map(c => `<div style="color:#5f6368;">${c.sourceName} <span style="font-size:9px;color:#888;">by ${c.by}</span></div>`).join('')}</div>`;
+    if (splits.length) content += `<div style="margin-bottom:6px;"><strong style="font-size:10px;color:#e91e63;display:block;margin-bottom:2px;">SPLITTING TO</strong>${splits.map(c => `<div style="color:#5f6368;">${c.newNames.join(', ')} <span style="font-size:9px;color:#888;">by ${c.by}</span></div>`).join('')}</div>`;
+    if (deletes.length) content += `<div style="margin-bottom:6px;"><strong style="font-size:10px;color:#f44336;display:block;margin-bottom:2px;">DELETION</strong>${deletes.map(c => `<div style="color:#5f6368;">Requested <span style="font-size:9px;color:#888;">by ${c.by}</span></div>`).join('')}</div>`;
+
+    const treeHtml = `
+      <div style="color: #ff9800; font-weight: bold; margin-bottom: 12px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #e0e0e0; padding-bottom: 4px;">
+        Pending Proposals (${d.data.conflicts.length})
+      </div>
+      <div>${content}</div>
+    `;
+    mergeTooltip.value = { show: true, x: event.pageX + 20, y: event.pageY + 20, html: treeHtml };
   } else if (d.data.deletedChildren && d.data.deletedChildren.length > 0) {
     // Deletion History Tooltip
     const generateHtml = (node) => {

@@ -403,9 +403,24 @@ export class TreeRenderer {
       .attr("stroke-width", 4).attr("stroke-linecap", "round").style("opacity", 0); 
 
     nodesEnter.append("text").attr("class", "node-name").attr("dy", 1).attr("text-anchor", "middle").style("font-family", "system-ui, sans-serif").style("font-size", "10px").style("font-weight", "500");
-    nodesEnter.append("text").attr("class", "conflict-text").attr("dy", 18).style("fill", "#ff9800").style("font-size", "11px").style("font-weight", "bold").attr("text-anchor", "middle");
     nodesEnter.append("text").attr("class", "lock-icon").attr("dy", -12).attr("dx", 55).style("font-size", "14px");
-    nodesEnter.append("text").attr("class", "user-label").attr("dy", 18).attr("text-anchor", "middle").style("font-size", "8px");
+    
+    // Scalable foreignObject for layout underneath the node
+    nodesEnter.append("foreignObject")
+      .attr("class", "node-meta-fo")
+      .attr("width", NODE_DIMENSIONS.width + 40)
+      .attr("height", 60)
+      .attr("x", -(NODE_DIMENSIONS.width + 40) / 2)
+      .attr("y", NODE_DIMENSIONS.height / 2 + 2)
+      .append("xhtml:div")
+      .attr("class", "node-meta-container")
+      .style("display", "flex")
+      .style("flex-direction", "column")
+      .style("align-items", "center")
+      .style("text-align", "center")
+      .style("width", "100%")
+      .style("height", "100%")
+      .style("overflow", "hidden");
 
     const nodesMerge = nodesEnter.merge(nodesData);
     
@@ -440,41 +455,35 @@ export class TreeRenderer {
       .style("text-decoration", "none")
       .style("fill", "#333");
 
-    nodesMerge.select(".conflict-text").text(d => {
-      if (!d.data.conflicts?.length) return "";
-      
-      const renames = d.data.conflicts.filter(c => c.type === 'rename').map(c => `"${c.value}"`);
-      const merges = d.data.conflicts.filter(c => c.type === 'merge-proposal').map(c => c.sourceName);
-      const splits = d.data.conflicts.filter(c => c.type === 'split-proposal').map(c => c.newNames.join(', '));
-      
-      let display = [];
-      if (renames.length) display.push(`[RENAME]: ${renames.join(', ')}`);
-      if (splits.length) display.push(`[SPLIT]: ${splits.join(' | ')}`);
-      if (merges.length) display.push(`[MERGING: ${merges.length}]`);
-      
-      return display.join(' | ');
-    });
-
     nodesMerge.select(".lock-icon").text(d => d.data.locked ? "🔒 " : "");
 
     nodesMerge.select(".merge-icon").style("opacity", d => d.data.mergedFrom ? 1 : 0);
     nodesMerge.select(".split-icon").style("opacity", d => d.data.splitFrom ? 1 : 0);
     nodesMerge.select(".delete-icon").style("opacity", d => d.data.deletedChildren?.length ? 1 : 0);
 
-    nodesMerge.select(".user-label")
-      .attr("dy", d => {
-        const hasConflictText = d.data.conflicts?.some(c => c.type === 'rename' || c.type === 'merge-proposal' || c.type === 'split-proposal');
-        return hasConflictText ? 20 : 12;
-      })
-      .text(d => {
-        if (d.data.isGhost) return "Proposed State";
-        let text = d.data.lastEditedBy ? `✎ ${d.data.lastEditedBy}` : "";
-        if (d.data.conflicts?.length) text += ` [CONFLICTS: ${d.data.conflicts.length}]`;
-        else if (d.data.action) text += ` [${d.data.action.toUpperCase()}]`;
-        if (d.data.mergedFrom) text += ` [MERGED]`;
-        if (d.data.splitFrom) text += ` [SPLIT]`; 
-        return text;
-      });
+    // Content Condensation via HTML injection
+    nodesMerge.select(".node-meta-container").html(d => {
+      let html = "";
+      
+      if (d.data.conflicts?.length) {
+        const count = d.data.conflicts.length;
+        html += `<div style="color: #ff9800; font-size: 10px; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; letter-spacing: 0.5px;">[${count} PROPOSAL${count > 1 ? 'S' : ''}]</div>`;
+      }
+
+      let userText = d.data.isGhost ? "Proposed State" : "";
+      if (!userText) {
+        if (d.data.lastEditedBy) userText += `✎ ${d.data.lastEditedBy}`;
+        if (d.data.action) userText += ` [${d.data.action.toUpperCase()}]`;
+        if (d.data.mergedFrom) userText += ` [MERGED]`;
+        if (d.data.splitFrom) userText += ` [SPLIT]`;
+      }
+
+      if (userText) {
+        html += `<div style="font-size: 8px; color: #5f6368; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; margin-top: 2px;">${userText}</div>`;
+      }
+
+      return html;
+    });
 
     nodesMerge.each((d, i, nodes) => { this.nodeElements.set(d, d3.select(nodes[i])); });
 
