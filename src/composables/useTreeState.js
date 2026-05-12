@@ -35,8 +35,10 @@ function syncFromNetwork() {
 
     webrtcService.addEventListener('client-joined', (e) => {
       if (netState.isHost) {
-        // Force the client to overwrite their local tree to bypass CRDT tie-breakers
-        webrtcService.sendToPeer(e.detail, { type: 'WELCOME_SYNC', payload: sharedTree.get('root') });
+        // Extract pure JSON to prevent MessagePack Map() serialization crashes
+        const safePayload = getSharedTreeJSON();
+        webrtcService.sendToPeer(e.detail, { type: 'WELCOME_SYNC', payload: safePayload });
+        
         // Send the underlying Yjs binary to align vector clocks
         webrtcService.sendToPeer(e.detail, encodeCurrentState());
       }
