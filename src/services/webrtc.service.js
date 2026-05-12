@@ -3,6 +3,7 @@
 import Peer from 'peerjs';
 
 const webrtcConfig = {
+  debug: 3, // Forces PeerJS to log exactly why a connection drops
   config: {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
