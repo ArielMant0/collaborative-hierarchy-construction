@@ -2,6 +2,16 @@
 
 import Peer from 'peerjs';
 
+const webrtcConfig = {
+  config: {
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun2.l.google.com:19302' }
+    ]
+  }
+};
+
 class WebRTCService extends EventTarget {
   constructor() {
     super();
@@ -11,7 +21,7 @@ class WebRTCService extends EventTarget {
   }
 
   initHost() {
-    this.peer = new Peer();
+    this.peer = new Peer(webrtcConfig);
     
     this.peer.on('open', (id) => this.dispatchEvent(new CustomEvent('host-opened', { detail: id })));
     
@@ -35,7 +45,7 @@ class WebRTCService extends EventTarget {
   }
 
   joinHost(hostId) {
-    this.peer = new Peer();
+    this.peer = new Peer(webrtcConfig);
     
     this.peer.on('open', (id) => {
       this.dispatchEvent(new CustomEvent('client-opened', { detail: id }));

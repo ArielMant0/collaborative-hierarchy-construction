@@ -633,11 +633,21 @@ function executeResolution(option, conflict, node) {
 
   // --- DELETE RESOLUTION ---
   if (act === 'delete-node') {
-    // 1. Capture the historical structure before destroying the node
-    const deletedStructure = {
+    // 1. Capture the historical structure and generate FRESH IDs to satisfy the CRDT array mapping 
+    // without colliding with the live nodes (especially if children are hoisted).
+    const historicalRecord = {
+      id: generateId(), 
       name: liveNode.name,
+      action: 'deleted',
+      deletedBy: conflict.by || netState.username,
+      timestamp: Date.now(),
       children: liveNode.children ? JSON.parse(JSON.stringify(liveNode.children)) : []
     };
+    
+    // Scramble the IDs of the historical children so they don't collide with hoisted active nodes
+    if (historicalRecord.children.length > 0) {
+      historicalRecord.children.forEach(addUUIDs);
+    }
 
     if (!liveParent) {
       // Root Node Deletion: Swap to Canvas Root and store history on the floor
@@ -645,16 +655,22 @@ function executeResolution(option, conflict, node) {
         id: generateId(),
         name: "Canvas Root",
         isSystemRoot: true,
-        children: [],
-        deletedChildren: [deletedStructure]
+        children: liveNode.children ? JSON.parse(JSON.stringify(liveNode.children)) : [],
+        deletedChildren: [historicalRecord]
       };
     } else {
-      // Standard Deletion: Append history to parent and sever the child
+      // Standard Deletion: Append history to parent
       if (!liveParent.deletedChildren) liveParent.deletedChildren = [];
-      liveParent.deletedChildren.push(deletedStructure);
+      liveParent.deletedChildren.push(historicalRecord);
 
+      // Sever the child
       const idx = liveParent.children.findIndex(c => c.id === liveNode.id);
       if (idx > -1) liveParent.children.splice(idx, 1);
+      
+      // System Root Cascade: If deleting a floating node, hoist its children to the floor
+      if (liveParent.isSystemRoot && liveNode.children) {
+        liveNode.children.forEach(child => liveParent.children.push(child));
+      }
     }
   }
 

@@ -86,60 +86,59 @@ function handleHover({ event, d }) {
       </div>
     `;
     mergeTooltip.value = { show: true, x: event.pageX + 20, y: event.pageY + 20, html: treeHtml };
-  } else if (d.data.conflicts && d.data.conflicts.length > 0) {
-    const renames = d.data.conflicts.filter(c => c.type === 'rename');
-    const merges = d.data.conflicts.filter(c => c.type === 'merge-proposal');
-    const splits = d.data.conflicts.filter(c => c.type === 'split-proposal');
-    const deletes = d.data.conflicts.filter(c => c.type === 'delete');
-    const moves = d.data.conflicts.filter(c => c.type === 'move-proposal'); // NEW
-
+  } else if ((d.data.conflicts && d.data.conflicts.length > 0) || (d.data.deletedChildren && d.data.deletedChildren.length > 0)) {
     let content = '';
-    if (renames.length) content += `<div style="margin-bottom:6px;"><strong style="font-size:10px;color:#ff9800;display:block;margin-bottom:2px;">RENAMES</strong>${renames.map(c => `<div style="color:#5f6368;">"${c.value}" <span style="font-size:9px;color:#888;">by ${c.by}</span></div>`).join('')}</div>`;
-    if (merges.length) content += `<div style="margin-bottom:6px;"><strong style="font-size:10px;color:#9c27b0;display:block;margin-bottom:2px;">MERGING</strong>${merges.map(c => `<div style="color:#5f6368;">${c.sourceName} <span style="font-size:9px;color:#888;">by ${c.by}</span></div>`).join('')}</div>`;
-    if (splits.length) content += `<div style="margin-bottom:6px;"><strong style="font-size:10px;color:#e91e63;display:block;margin-bottom:2px;">SPLITTING TO</strong>${splits.map(c => `<div style="color:#5f6368;">${c.newNames.join(', ')} <span style="font-size:9px;color:#888;">by ${c.by}</span></div>`).join('')}</div>`;
-    if (moves.length) content += `<div style="margin-bottom:6px;"><strong style="font-size:10px;color:#009688;display:block;margin-bottom:2px;">MOVING TO</strong>${moves.map(c => `<div style="color:#5f6368;">'${c.targetName || 'Unknown Destination'}' <span style="font-size:9px;color:#888;">by ${c.by}</span></div>`).join('')}</div>`;
-    if (deletes.length) content += `<div style="margin-bottom:6px;"><strong style="font-size:10px;color:#f44336;display:block;margin-bottom:2px;">DELETION</strong>${deletes.map(c => `<div style="color:#5f6368;">Requested <span style="font-size:9px;color:#888;">by ${c.by}</span></div>`).join('')}</div>`;
+    let count = 0;
+
+    // 1. Process Conflicts
+    if (d.data.conflicts && d.data.conflicts.length > 0) {
+      const renames = d.data.conflicts.filter(c => c.type === 'rename');
+      const merges = d.data.conflicts.filter(c => c.type === 'merge-proposal');
+      const splits = d.data.conflicts.filter(c => c.type === 'split-proposal');
+      const moves = d.data.conflicts.filter(c => c.type === 'move-proposal');
+      const deletes = d.data.conflicts.filter(c => c.type === 'delete');
+
+      if (renames.length) content += `<div style="margin-bottom:6px;"><strong style="font-size:10px;color:#ff9800;display:block;margin-bottom:2px;">RENAMES</strong>${renames.map(c => `<div style="color:#5f6368;">"${c.value}" <span style="font-size:9px;color:#888;">by ${c.by}</span></div>`).join('')}</div>`;
+      if (merges.length) content += `<div style="margin-bottom:6px;"><strong style="font-size:10px;color:#9c27b0;display:block;margin-bottom:2px;">MERGING</strong>${merges.map(c => `<div style="color:#5f6368;">${c.sourceName} <span style="font-size:9px;color:#888;">by ${c.by}</span></div>`).join('')}</div>`;
+      if (splits.length) content += `<div style="margin-bottom:6px;"><strong style="font-size:10px;color:#e91e63;display:block;margin-bottom:2px;">SPLITTING TO</strong>${splits.map(c => `<div style="color:#5f6368;">${c.newNames.join(', ')} <span style="font-size:9px;color:#888;">by ${c.by}</span></div>`).join('')}</div>`;
+      if (moves.length) content += `<div style="margin-bottom:6px;"><strong style="font-size:10px;color:#009688;display:block;margin-bottom:2px;">MOVING TO</strong>${moves.map(c => `<div style="color:#5f6368;">'${c.targetName || 'Unknown Destination'}' <span style="font-size:9px;color:#888;">by ${c.by}</span></div>`).join('')}</div>`;
+      if (deletes.length) content += `<div style="margin-bottom:6px;"><strong style="font-size:10px;color:#f44336;display:block;margin-bottom:2px;">DELETION</strong>${deletes.map(c => `<div style="color:#5f6368;">Requested <span style="font-size:9px;color:#888;">by ${c.by}</span></div>`).join('')}</div>`;
+      
+      count += d.data.conflicts.length;
+    }
+
+    // 2. Process Deleted History
+    if (d.data.deletedChildren && d.data.deletedChildren.length > 0) {
+      if (count > 0) content += `<div style="margin-top: 8px; padding-top: 8px; border-top: 1px dashed #ccc;"></div>`;
+      content += `<div style="margin-bottom:6px;"><strong style="font-size:10px;color:#f44336;display:block;margin-bottom:2px;">DELETED HISTORY</strong>`;
+      
+      d.data.deletedChildren.forEach(del => {
+        content += `<div style="color:#5f6368; font-weight: bold;">"${del.name}" <span style="font-size:9px;color:#888;">by ${del.deletedBy || 'System'}</span></div>`;
+        
+        // Recursively extract and list the names of all sub-nodes
+        if (del.children && del.children.length) {
+          const getChildNames = (nodes) => {
+            let names = [];
+            nodes.forEach(n => {
+              names.push(`'${n.name}'`);
+              if (n.children) names = names.concat(getChildNames(n.children));
+            });
+            return names;
+          };
+          
+          const childNames = getChildNames(del.children);
+          content += `<div style="font-size:9px; color:#aaa; margin-left: 8px;">Sub-nodes: ${childNames.join(', ')}</div>`;
+        }
+      });
+      content += `</div>`;
+      count += d.data.deletedChildren.length;
+    }
 
     const treeHtml = `
-      <div style="color: #ff9800; font-weight: bold; margin-bottom: 12px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #e0e0e0; padding-bottom: 4px;">
-        Pending Proposals (${d.data.conflicts.length})
+      <div style="color: #333; font-weight: bold; margin-bottom: 12px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #e0e0e0; padding-bottom: 4px;">
+        Node Activity (${count})
       </div>
       <div>${content}</div>
-    `;
-    mergeTooltip.value = { show: true, x: event.pageX + 20, y: event.pageY + 20, html: treeHtml };
-  } else if (d.data.deletedChildren && d.data.deletedChildren.length > 0) {
-
-    let content = '';
-    if (renames.length) content += `<div style="margin-bottom:6px;"><strong style="font-size:10px;color:#ff9800;display:block;margin-bottom:2px;">RENAMES</strong>${renames.map(c => `<div style="color:#5f6368;">"${c.value}" <span style="font-size:9px;color:#888;">by ${c.by}</span></div>`).join('')}</div>`;
-    if (merges.length) content += `<div style="margin-bottom:6px;"><strong style="font-size:10px;color:#9c27b0;display:block;margin-bottom:2px;">MERGING</strong>${merges.map(c => `<div style="color:#5f6368;">${c.sourceName} <span style="font-size:9px;color:#888;">by ${c.by}</span></div>`).join('')}</div>`;
-    if (splits.length) content += `<div style="margin-bottom:6px;"><strong style="font-size:10px;color:#e91e63;display:block;margin-bottom:2px;">SPLITTING TO</strong>${splits.map(c => `<div style="color:#5f6368;">${c.newNames.join(', ')} <span style="font-size:9px;color:#888;">by ${c.by}</span></div>`).join('')}</div>`;
-    if (deletes.length) content += `<div style="margin-bottom:6px;"><strong style="font-size:10px;color:#f44336;display:block;margin-bottom:2px;">DELETION</strong>${deletes.map(c => `<div style="color:#5f6368;">Requested <span style="font-size:9px;color:#888;">by ${c.by}</span></div>`).join('')}</div>`;
-
-    const treeHtml = `
-      <div style="color: #ff9800; font-weight: bold; margin-bottom: 12px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #e0e0e0; padding-bottom: 4px;">
-        Pending Proposals (${d.data.conflicts.length})
-      </div>
-      <div>${content}</div>
-    `;
-    mergeTooltip.value = { show: true, x: event.pageX + 20, y: event.pageY + 20, html: treeHtml };
-  } else if (d.data.deletedChildren && d.data.deletedChildren.length > 0) {
-    // Deletion History Tooltip
-    const generateHtml = (node) => {
-      let str = `<li>${node.name}</li>`;
-      if (node.children && node.children.length) {
-        str += `<ul>${node.children.map(generateHtml).join('')}</ul>`;
-      }
-      return str;
-    };
-
-    const treeHtml = `
-      <div style="color: #f44336; font-weight: bold; margin-bottom: 12px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #e0e0e0; padding-bottom: 4px;">
-        Deletion History
-      </div>
-      <div>
-        <div style="font-size: 10px; color: #5f6368; text-transform: uppercase; margin-bottom: 4px;">Removed Categories</div>
-        <ul>${d.data.deletedChildren.map(generateHtml).join('')}</ul>
-      </div>
     `;
     mergeTooltip.value = { show: true, x: event.pageX + 20, y: event.pageY + 20, html: treeHtml };
   }
