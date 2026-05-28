@@ -2,6 +2,8 @@
 
 import Peer from 'peerjs';
 
+export const DEBUG_NETWORK = true;
+
 const webrtcConfig = {
   debug: 3, // Forces PeerJS to log exactly why a connection drops
   config: {
@@ -36,7 +38,7 @@ class WebRTCService extends EventTarget {
   }
 
   dispatchEvent(event) {
-    if (event instanceof CustomEvent) {
+    if (DEBUG_NETWORK && event instanceof CustomEvent) {
       console.groupCollapsed(`[WebRTC] ${new Date().toISOString()} | ${event.type}`);
       if (event.detail !== undefined) console.dir(event.detail);
       console.groupEnd();
@@ -117,6 +119,10 @@ class WebRTCService extends EventTarget {
   }
 
   broadcast(data, excludePeerId = null) {
+    if (DEBUG_NETWORK) {
+      const size = data.byteLength || JSON.stringify(data).length;
+      console.log(`[WebRTC: Outgoing Broadcast] Size: ${size}b | Excluded: ${excludePeerId}`);
+    }
     this.clientConnections.forEach((conn, peerId) => {
       if (conn.open && peerId !== excludePeerId) conn.send(data);
     });
@@ -125,6 +131,10 @@ class WebRTCService extends EventTarget {
   sendToPeer(peerId, data) {
     const conn = this.clientConnections.get(peerId);
     if (conn && conn.open) {
+      if (DEBUG_NETWORK) {
+        const size = data.byteLength || JSON.stringify(data).length;
+        console.log(`[WebRTC: Outgoing Direct -> ${peerId}] Size: ${size}b`);
+      }
       conn.send(data);
     }
   }
@@ -133,6 +143,10 @@ class WebRTCService extends EventTarget {
     if (isHost) {
       this.broadcast(update);
     } else if (this.hostConnection && this.hostConnection.open) {
+      if (DEBUG_NETWORK) {
+        const size = update.byteLength || JSON.stringify(update).length;
+        console.log(`[WebRTC: Outgoing Update -> Host] Size: ${size}b`);
+      }
       this.hostConnection.send(update);
     }
   }
@@ -141,6 +155,7 @@ class WebRTCService extends EventTarget {
     if (isHost) {
       this.broadcast({ type: 'PING', sender: 'HOST' });
     } else if (this.hostConnection) {
+      if (DEBUG_NETWORK) console.log(`[WebRTC: Outgoing Ping -> Host]`);
       this.hostConnection.send({ type: 'PING' });
     }
   }

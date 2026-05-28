@@ -1,6 +1,7 @@
 // Manages the Yjs document, the shared tree structure, and network syncing
 
 import * as Y from 'yjs';
+import { DEBUG_NETWORK } from './webrtc.service.js';
 
 export const ydoc = new Y.Doc();
 export const sharedTree = ydoc.getMap('treeData');
@@ -9,14 +10,18 @@ export function applyNetworkUpdate(updatePayload) {
   try {
     const update = new Uint8Array(updatePayload);
     Y.applyUpdate(ydoc, update, 'network');
+    if (DEBUG_NETWORK) console.log(`[CRDT: Decode Success] Applied binary update. Size: ${update.byteLength}b`);
     window.dispatchEvent(new Event('tree-updated'));
   } catch (error) {
-    console.error("CRDT Service failed to process binary data:", error);
+    if (DEBUG_NETWORK) console.error("[CRDT: Decode Failure] Failed to process binary data:", error);
+    else console.error("CRDT Service failed to process binary data:", error);
   }
 }
 
 export function encodeCurrentState() {
-  return Y.encodeStateAsUpdate(ydoc);
+  const state = Y.encodeStateAsUpdate(ydoc);
+  if (DEBUG_NETWORK) console.log(`[CRDT: Encode Success] Generated binary state. Size: ${state.byteLength}b`);
+  return state;
 }
 
 // Deep syncs a JSON object into a Y.Map without overwriting the map's identity

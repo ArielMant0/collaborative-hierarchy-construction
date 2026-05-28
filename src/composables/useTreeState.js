@@ -3,7 +3,7 @@
 
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { sharedTree, applyNetworkUpdate, encodeCurrentState, updateSharedTreeRoot, getSharedTreeJSON } from '../services/crdt.service.js';
-import { webrtcService } from '../services/webrtc.service.js';
+import { webrtcService, DEBUG_NETWORK } from '../services/webrtc.service.js';
 import { removeDraftFlag, tagGlobalDuplicates} from '../utils/helpers.js';
 
 export function useTreeState(netState) {
@@ -14,6 +14,7 @@ export function useTreeState(netState) {
   const activeData = computed(() => isDraftMode.value ? draftTreeData.value : liveTreeData.value);
 
 function syncFromNetwork() {
+    if (DEBUG_NETWORK) console.log(`[TreeState: Local Sync] 'tree-updated' event caught. Rebuilding reactive state.`);
     const parsedData = getSharedTreeJSON();
     if (parsedData) {
       tagGlobalDuplicates(parsedData); 
