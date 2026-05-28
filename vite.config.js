@@ -1,3 +1,4 @@
+/// <reference types="vitest" />
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 
@@ -12,9 +13,14 @@ export default defineConfig({
       '/myapp': {
         target: 'http://localhost:9000',
         changeOrigin: true,
-        ws: true // Enables WebSocket tunneling for PeerJS
+        ws: true 
       }
     }
   },
-  preview: { base: BASE_PATH }
+  preview: { base: BASE_PATH },
+  test: {
+    environment: 'jsdom',
+    globals: true,
+    include: ['src/**/*.spec.js', 'src/**/*.test.js']
+  }
 })

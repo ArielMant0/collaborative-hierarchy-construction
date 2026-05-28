@@ -23,7 +23,7 @@
         <button @click="$emit('joinHost', localJoinId)" class="sleek-btn outline">Join</button>
       </div>
 
-      <div v-else class="connected-row">
+      <div v-else class="connected-row" :data-peer-id="netState.peerId">
         <div class="user-badge" :title="netState.lastMessage">
           <span class="status-dot"></span>
           <span class="username">{{ netState.username }}</span>

@@ -1,0 +1,32 @@
+name: Regression Pipeline
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Execute Pure Logic Unit Tests (Vitest)
+        run: npm run test:unit
+
+      - name: Install Playwright OS Dependencies and Browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Execute E2E Network Synchronization Tests (Playwright)
+        run: npm run test:e2e
