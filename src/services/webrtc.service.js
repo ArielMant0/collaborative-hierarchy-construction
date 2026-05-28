@@ -35,6 +35,15 @@ class WebRTCService extends EventTarget {
     this.clientConnections = new Map();
   }
 
+  dispatchEvent(event) {
+    if (event instanceof CustomEvent) {
+      console.groupCollapsed(`[WebRTC] ${new Date().toISOString()} | ${event.type}`);
+      if (event.detail !== undefined) console.dir(event.detail);
+      console.groupEnd();
+    }
+    return super.dispatchEvent(event);
+  }
+
   initHost() {
     this.peer = new Peer(webrtcConfig);
     
