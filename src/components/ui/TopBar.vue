@@ -3,9 +3,20 @@
 <template>
   <header class="sleek-top-bar">
     <div class="workspace-controls">
+      <button class="sleek-btn outline" @click="$emit('addDockedNode')" title="Add Unplaced Concept">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+        Add Node
+      </button>
+      <div class="divider"></div>
       <div class="segmented-control">
         <button :class="{ active: !isDraftMode }" @click="$emit('switchMode', false)">Staging</button>
         <button :class="{ active: isDraftMode }" @click="$emit('switchMode', true)">Draft</button>
+      </div>
+      <div class="divider"></div>
+      <div class="segmented-control">
+        <button :class="{ active: layoutMode === 'horizontal' }" @click="$emit('updateLayout', 'horizontal')">Horizontal</button>
+        <button :class="{ active: layoutMode === 'vertical' }" @click="$emit('updateLayout', 'vertical')">Vertical</button>
+        <button :class="{ active: layoutMode === 'radial' }" @click="$emit('updateLayout', 'radial')">Radial</button>
       </div>
       <button v-if="isDraftMode" class="sleek-btn primary commit-btn" @click="$emit('commitChanges')">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path><path d="M12 5l7 7-7 7"></path></svg>
@@ -50,10 +61,11 @@ import { ref, watch } from 'vue';
 
 const props = defineProps({
   isDraftMode: Boolean,
-  netState: Object
+  netState: Object,
+  layoutMode: String
 });
 
-const emit = defineEmits(['switchMode', 'commitChanges', 'initHost', 'joinHost', 'updateUsername']);
+const emit = defineEmits(['switchMode', 'commitChanges', 'initHost', 'joinHost', 'updateUsername', 'updateLayout', 'addDockedNode']);
 
 const localJoinId = ref('');
 const localUsername = ref(props.netState.username);

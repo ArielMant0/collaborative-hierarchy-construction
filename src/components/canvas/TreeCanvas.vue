@@ -2,7 +2,24 @@
 // This file bridges the pure D3 logic into the Vue template
 
 <template>
-  <div class="canvas-container">
+  <div class="canvas-container" @dragover.prevent @drop="handleCanvasDrop">
+    <div v-if="dockedNodes.length > 0" class="docked-container">
+      <div class="docked-header">Unplaced Concepts ({{ dockedNodes.length }})</div>
+      <div class="docked-list">
+        <div 
+          v-for="node in dockedNodes" 
+          :key="node.id"
+          class="docked-node"
+          :class="{ 'selected': selectedIds.has(node.id) }"
+          draggable="true"
+          @dragstart="handleDragStart($event, node)"
+          @click.stop="(e) => emit('node-selected', { d: { data: node, parent: { data: treeData } }, event: e })"
+        >
+          {{ node.name }}
+        </div>
+      </div>
+    </div>
+
     <div class="canvas-controls">
       <button class="icon-btn" @click="recenter" title="Recenter View">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -19,7 +36,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch, onUnmounted } from 'vue';
+import { ref, computed, onMounted, watch, onUnmounted } from 'vue';
 import { TreeRenderer } from '../../services/d3.renderer.js';
 import * as d3 from 'd3';
 
@@ -27,14 +44,43 @@ const props = defineProps({
   treeData: Object,
   isDraftMode: Boolean,
   localPeerId: String,
-  selectedIds: Set
+  selectedIds: Set,
+  layoutMode: String
 });
 
-const emit = defineEmits(['node-selected', 'node-moved', 'add-floating-node']);
+const emit = defineEmits(['node-selected', 'node-moved', 'add-floating-node', 'docked-node-placed']);
 
 function handleCanvasDoubleClick() {
   emit('add-floating-node');
 }
+
+let draggedDockedNode = null;
+
+function handleDragStart(event, node) {
+  draggedDockedNode = node;
+  event.dataTransfer.effectAllowed = 'move';
+  event.dataTransfer.setData('text/plain', node.id);
+}
+
+function handleCanvasDrop(event) {
+  if (!draggedDockedNode || !renderer) return;
+
+  const targetNode = renderer.findNodeAtPosition(event.clientX, event.clientY);
+  
+  emit('docked-node-placed', { draggedNode: draggedDockedNode, targetNode: targetNode });
+  draggedDockedNode = null;
+}
+
+const dockedNodes = computed(() => {
+  if (!props.treeData) return [];
+  const docked = [];
+  const traverse = (node) => {
+    if (node.isDocked) docked.push(node);
+    if (node.children) node.children.forEach(traverse);
+  };
+  traverse(props.treeData);
+  return docked;
+});
 
 const svgRef = ref(null);
 const mergeTooltip = ref({ show: false, x: 0, y: 0, html: '' });
@@ -176,7 +222,8 @@ onMounted(() => {
   renderer.updateContext({
     isDraftMode: props.isDraftMode,
     localPeerId: props.localPeerId,
-    selectedIds: props.selectedIds
+    selectedIds: props.selectedIds,
+    layoutMode: props.layoutMode
   });
 
   if (props.treeData) renderer.render(props.treeData);
@@ -203,19 +250,21 @@ watch(() => props.treeData, (newData) => {
   if (renderer && newData) renderer.render(newData);
 }, { deep: true });
 
-watch(() => [props.isDraftMode, props.localPeerId, props.selectedIds, showDeleted.value], (newVals, oldVals) => {
+watch(() => [props.isDraftMode, props.localPeerId, props.selectedIds, showDeleted.value, props.layoutMode], (newVals, oldVals) => {
   if (renderer) {
     renderer.updateContext({
       isDraftMode: props.isDraftMode,
       localPeerId: props.localPeerId,
       selectedIds: props.selectedIds,
-      showDeleted: showDeleted.value
+      showDeleted: showDeleted.value,
+      layoutMode: props.layoutMode
     });
     renderer.render(props.treeData);
     
     // Only snap the tree to the center if the 'showDeleted' toggle 
     const showDeletedChanged = oldVals && oldVals[3] !== newVals[3];
-    if (showDeletedChanged && !newVals[3]) {
+    const layoutModeChanged = oldVals && oldVals[4] !== newVals[4];
+    if ((showDeletedChanged && !newVals[3]) || layoutModeChanged) {
       renderer.recenter(props.treeData, true);
     }
   }
@@ -264,6 +313,59 @@ watch(() => [props.isDraftMode, props.localPeerId, props.selectedIds, showDelete
 .merge-tooltip > div > ul > li::before {
   display: none;
 }
+.docked-container {
+  position: absolute;
+  top: 76px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(8px);
+  border: 1px solid #e0e0e0;
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  z-index: 50;
+  max-height: 150px;
+  width: 60%;
+  overflow-y: auto;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+}
+.docked-header {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #5f6368;
+  letter-spacing: 0.5px;
+}
+.docked-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.docked-node {
+  background: white;
+  border: 2px solid #e0e0e0;
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #333;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+}
+.docked-node:hover {
+  border-color: #b0bec5;
+  transform: translateY(-1px);
+}
+.docked-node.selected {
+  border-color: #1a73e8;
+  background: #e8f0fe;
+  color: #1a73e8;
+}
+
 .canvas-controls {
   position: absolute;
   top: 76px;

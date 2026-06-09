@@ -27,10 +27,30 @@ export class TreeRenderer {
     this.initialRenderDone = false;
     this.nameColorScale = d3.scaleOrdinal(d3.schemePastel1);
     
-    this.ctx = { isDraftMode: false, localPeerId: null, selectedIds: new Set(), showDeleted: true };
+    this.ctx = { isDraftMode: false, localPeerId: null, selectedIds: new Set(), showDeleted: true, layoutMode: 'vertical' };
     
     this.initCanvas();
     this.drag = this.createDragBehavior();
+  }
+
+  getLayout(root) {
+    if (this.ctx.layoutMode === 'vertical') {
+      return d3.tree().nodeSize([NODE_DIMENSIONS.height + 20, NODE_DIMENSIONS.width + 60]).separation((a, b) => (a.parent === b.parent ? 1 : 1.1));
+    } else if (this.ctx.layoutMode === 'radial') {
+      const radiusStep = NODE_DIMENSIONS.width + 140;
+      const totalRadius = Math.max(400, (root.height || 1) * radiusStep);
+      return d3.tree().size([2 * Math.PI, totalRadius]).separation((a, b) => (a.parent === b.parent ? 1.5 : 2.5) / (a.depth || 1));
+    }
+    return d3.tree().nodeSize([NODE_DIMENSIONS.width + 20, NODE_DIMENSIONS.height + 40]).separation((a, b) => (a.parent === b.parent ? 1 : 1.1));
+  }
+
+  project(x, y) {
+    if (this.ctx.layoutMode === 'vertical') return [y, x];
+    if (this.ctx.layoutMode === 'radial') {
+      const angle = x - (Math.PI / 2); // x is strictly in radians (0 to 2*PI)
+      return [y * Math.cos(angle), y * Math.sin(angle)];
+    }
+    return [x, y];
   }
 
   initCanvas() {
@@ -48,6 +68,38 @@ export class TreeRenderer {
 
   updateContext(newContext) {
     this.ctx = { ...this.ctx, ...newContext };
+  }
+
+  findNodeAtPosition(clientX, clientY) {
+    const svgNode = this.svg.node();
+    const point = svgNode.createSVGPoint();
+    point.x = clientX;
+    point.y = clientY;
+
+    const screenCTM = svgNode.getScreenCTM();
+    if (!screenCTM) return null;
+
+    const svgPoint = point.matrixTransform(screenCTM.inverse());
+    const zoomTransform = d3.zoomTransform(svgNode);
+
+    const x = (svgPoint.x - zoomTransform.x) / zoomTransform.k;
+    const y = (svgPoint.y - zoomTransform.y) / zoomTransform.k;
+
+    let droppedOnNode = null;
+    const halfW = NODE_DIMENSIONS.width / 2;
+    const halfH = NODE_DIMENSIONS.height / 2;
+
+    this.nodeElements.forEach((targetEl, targetNode) => {
+      if (targetNode.data.isSystemRoot) return;
+      if (
+        x >= targetNode.px - halfW && x <= targetNode.px + halfW &&
+        y >= targetNode.py - halfH && y <= targetNode.py + halfH
+      ) {
+        droppedOnNode = targetNode;
+      }
+    });
+
+    return droppedOnNode;
   }
 
   getStrokeColor(data) {
@@ -71,17 +123,22 @@ export class TreeRenderer {
     const width = window.innerWidth;
     const height = window.innerHeight; 
     
-    const root = d3.hierarchy(treeData);
+    const root = d3.hierarchy(treeData, d => {
+      const visible = d.children?.filter(c => !c.isDocked);
+      return visible?.length ? visible : null;
+    });
 
-    const treeLayout = d3.tree().nodeSize([NODE_DIMENSIONS.width + 15, NODE_DIMENSIONS.height + 40]);
+    const treeLayout = this.getLayout(root);
     treeLayout(root);
 
     let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
     root.each(d => {
-      if (d.x < x0) x0 = d.x;
-      if (d.x > x1) x1 = d.x;
-      if (d.y < y0) y0 = d.y;
-      if (d.y > y1) y1 = d.y;
+      const [px, py] = this.project(d.x, d.y);
+      d.px = px; d.py = py;
+      if (d.px < x0) x0 = d.px;
+      if (d.px > x1) x1 = d.px;
+      if (d.py < y0) y0 = d.py;
+      if (d.py > y1) y1 = d.py;
     });
 
     if (x0 === Infinity) return;
@@ -117,6 +174,7 @@ export class TreeRenderer {
   createDragBehavior() {
     const renderer = this;
     return d3.drag()
+      .subject(function(event, d) { return { x: d.px, y: d.py }; })
       .on("start", function(event, d) {
         if (!canEditNode(d.data, renderer.ctx.localPeerId) || !canEditNode(d.parent?.data, renderer.ctx.localPeerId)) return; 
         
@@ -136,21 +194,32 @@ export class TreeRenderer {
         const totalDistance = Math.hypot(event.x - d.startX, event.y - d.startY);
         if (totalDistance > 5) d.hasMoved = true;
         
-        d.x = event.x; d.y = event.y;
+        d.px = event.x; d.py = event.y;
         
-        const el = renderer.nodeElements.get(d);
-        if (el) el.attr("transform", `translate(${d.x},${d.y})`);
+        d3.select(this).attr("transform", `translate(${d.px},${d.py})`);
         
-        const link = renderer.linkElements.get(d);
-        if (link) {
-          const dragLinkGen = d3.linkVertical()
-            .source(l => [l.source.x, l.source.y + NODE_DIMENSIONS.height / 2])
-            .target(l => [l.target.x, l.target.y - NODE_DIMENSIONS.height / 2]);
+        const refreshLink = (targetNode) => {
+          const l = renderer.linkElements.get(targetNode);
+          if (!l) return;
+          let dragLinkGen;
+          if (renderer.ctx.layoutMode === 'vertical') {
+            dragLinkGen = d3.link(d3.curveBumpX)
+              .source(linkData => [linkData.source.px + NODE_DIMENSIONS.width / 2, linkData.source.py])
+              .target(linkData => [linkData.target.px - NODE_DIMENSIONS.width / 2, linkData.target.py]);
+          } else if (renderer.ctx.layoutMode === 'radial') {
+            dragLinkGen = linkData => `M${linkData.source.px},${linkData.source.py} L${linkData.target.px},${linkData.target.py}`;
+          } else {
+            dragLinkGen = d3.link(d3.curveBumpY)
+              .source(linkData => [linkData.source.px, linkData.source.py + NODE_DIMENSIONS.height / 2])
+              .target(linkData => [linkData.target.px, linkData.target.py - NODE_DIMENSIONS.height / 2]);
+          }
+          l.attr("d", dragLinkGen).attr("stroke", COLORS.draft).attr("stroke-width", 3).attr("stroke-dasharray", "5,5");
+        };
 
-          link.attr("d", dragLinkGen)
-              .attr("stroke", COLORS.draft)
-              .attr("stroke-width", 3)
-              .attr("stroke-dasharray", "5,5");
+        refreshLink(d);
+        
+        if (d.children) {
+          d.children.forEach(child => refreshLink(child));
         }
       })
       .on("end", function(event, d) {
@@ -172,8 +241,8 @@ export class TreeRenderer {
           if (isSelfOrDescendant) return;
           
           if (
-              event.x >= targetNode.x - halfW && event.x <= targetNode.x + halfW &&
-              event.y >= targetNode.y - halfH && event.y <= targetNode.y + halfH
+              event.x >= targetNode.px - halfW && event.x <= targetNode.px + halfW &&
+              event.y >= targetNode.py - halfH && event.y <= targetNode.py + halfH
           ) {
             droppedOnNode = targetNode;
           }
@@ -214,45 +283,67 @@ export class TreeRenderer {
     this.nodeElements.clear();
     this.linkElements.clear();
     
-    const root = d3.hierarchy(treeData);
+    const root = d3.hierarchy(treeData, d => {
+      const visible = d.children?.filter(c => !c.isDocked);
+      return visible?.length ? visible : null;
+    });
 
-    const treeLayout = d3.tree()
-      .nodeSize([NODE_DIMENSIONS.width + 20, NODE_DIMENSIONS.height + 40])
-      .separation((a, b) => (a.parent === b.parent ? 1 : 1.1)); 
+    const treeLayout = this.getLayout(root);
     treeLayout(root);
+    
+    root.each(d => {
+      const [px, py] = this.project(d.x, d.y);
+      d.px = px; d.py = py;
+    });
 
     const t = this.svg.transition().duration(400);
 
     // --- Path Generators ---
-    const edgeLinkGen = d3.linkVertical()
-      .source(d => [d.source.x, d.source.y + NODE_DIMENSIONS.height / 2])
-      .target(d => [d.target.x, d.target.y - NODE_DIMENSIONS.height / 2]);
+    const edgeLinkGen = (d) => {
+      if (this.ctx.layoutMode === 'vertical') {
+        return d3.link(d3.curveBumpX)
+          .source(l => [l.source.px + NODE_DIMENSIONS.width / 2, l.source.py])
+          .target(l => [l.target.px - NODE_DIMENSIONS.width / 2, l.target.py])(d);
+      }
+      if (this.ctx.layoutMode === 'radial') {
+        return d3.linkRadial()
+          .angle(l => l.x)
+          .radius(l => l.y)(d);
+      }
+      return d3.link(d3.curveBumpY)
+        .source(l => [l.source.px, l.source.py + NODE_DIMENSIONS.height / 2])
+        .target(l => [l.target.px, l.target.py - NODE_DIMENSIONS.height / 2])(d);
+    };
 
     const getUnderArcPath = (d) => {
-      const dx = d.target.x - d.source.x;
-      const dy = d.target.y - d.source.y;
+      const dx = d.target.px - d.source.px;
+      const dy = d.target.py - d.source.py;
+      const dist = Math.sqrt(dx * dx + dy * dy);
       
-      // If the ghost is roughly directly below the source (like a standard child),
-      // use the clean vertical tree link to avoid tight, messy loops.
-      if (dy > 0 && Math.abs(dx) < NODE_DIMENSIONS.width * 1.5) {
-        return edgeLinkGen(d); 
+      if (dist < NODE_DIMENSIONS.width * 1.2) return edgeLinkGen(d);
+
+      const dr = dist * 1.1; 
+      let startPoint = [d.source.px, d.source.py];
+      let endPoint = [d.target.px, d.target.py];
+      let sweep = dx > 0 ? 0 : 1;
+
+      if (this.ctx.layoutMode === 'vertical') {
+        startPoint[0] += NODE_DIMENSIONS.width / 2;
+        endPoint[0] -= NODE_DIMENSIONS.width / 2;
+        sweep = dy > 0 ? 1 : 0;
+      } else if (this.ctx.layoutMode === 'horizontal') {
+        startPoint[1] += NODE_DIMENSIONS.height / 2;
+        endPoint[1] -= NODE_DIMENSIONS.height / 2;
       }
       
-      // For distant horizontal moves or upward moves, draw a sweeping under-arc
-      // so it loops around the outside of the tree instead of slicing through it.
-      const dr = Math.sqrt(dx * dx + dy * dy) * 1.2; 
-      const startY = d.source.y + (NODE_DIMENSIONS.height / 2);
-      const endY = d.target.y + (NODE_DIMENSIONS.height / 2);
-      const sweep = dx > 0 ? 0 : 1; 
-      
-      return `M${d.source.x},${startY} A${dr},${dr} 0 0,${sweep} ${d.target.x},${endY}`;
+      return `M${startPoint[0]},${startPoint[1]} A${dr},${dr} 0 0,${sweep} ${endPoint[0]},${endPoint[1]}`;
     };
 
     const getDuplicateArcPath = (d) => {
-      const dx = d.target.x - d.source.x;
-      const dy = d.target.y - d.source.y;
+      const dx = d.target.px - d.source.px;
+      const dy = d.target.py - d.source.py;
       const dr = Math.sqrt(dx * dx + dy * dy) * 1.2; 
-      return `M${d.source.x},${d.source.y} A${dr},${dr} 0 0,1 ${d.target.x},${d.target.y}`;
+      return `M${d.source.px},${d.source.py} A${dr},${dr} 0 0,1 ${d.target.px},${d.target.py}`;
     };
 
     // --- 1. Duplicate Ghost Links ---
@@ -291,19 +382,40 @@ export class TreeRenderer {
 
     // --- 2. Conflict Links ---
     const conflictLinksData = [];
+    const seenConflicts = new Set();
+    
     root.descendants().forEach(d => {
+      if (d.data.isGhost) return;
       if (d.data.conflicts) {
         d.data.conflicts.forEach(c => {
           if (c.type === 'move-proposal') {
             const ghostNode = root.descendants().find(n => n.data.id === c.ghostId);
-            if (ghostNode) conflictLinksData.push({ source: d, target: ghostNode, type: c.type });
+            if (ghostNode) {
+              const key = `move-${d.data.id}-${ghostNode.data.id}`;
+              if (!seenConflicts.has(key)) {
+                seenConflicts.add(key);
+                conflictLinksData.push({ source: d, target: ghostNode, type: c.type });
+              }
+            }
           } else if (c.type === 'merge-proposal') {
             const sourceNode = root.descendants().find(n => n.data.id === c.sourceId);
-            if (sourceNode) conflictLinksData.push({ source: sourceNode, target: d, type: c.type });
+            if (sourceNode) {
+              const key = `merge-${sourceNode.data.id}-${d.data.id}`;
+              if (!seenConflicts.has(key)) {
+                seenConflicts.add(key);
+                conflictLinksData.push({ source: sourceNode, target: d, type: c.type });
+              }
+            }
           } else if (c.type === 'split-proposal') {
             c.ghostIds.forEach(gId => {
               const ghostNode = root.descendants().find(n => n.data.id === gId);
-              if (ghostNode) conflictLinksData.push({ source: d, target: ghostNode, type: c.type });
+              if (ghostNode) {
+                const key = `split-${d.data.id}-${ghostNode.data.id}`;
+                if (!seenConflicts.has(key)) {
+                  seenConflicts.add(key);
+                  conflictLinksData.push({ source: d, target: ghostNode, type: c.type });
+                }
+              }
             });
           }
         });
@@ -322,11 +434,11 @@ export class TreeRenderer {
         if (d.type === 'split-proposal') return "#e91e63"; 
         return "#ff9800";
       })
-      .attr("d", getUnderArcPath); // Set shape before transition
+      .attr("d", d => d.type === 'split-proposal' ? edgeLinkGen(d) : getUnderArcPath(d));
 
     cLinksEnter.merge(cLinks)
       .transition(t)
-      .attr("d", getUnderArcPath);
+      .attr("d", d => d.type === 'split-proposal' ? edgeLinkGen(d) : getUnderArcPath(d));
 
     // --- 3. Regular Links ---
     const links = linksLayer.selectAll(".link").data(root.links(), d => d.source.data.id + "-link-" + d.target.data.id);
@@ -359,7 +471,7 @@ export class TreeRenderer {
 
     const nodesEnter = nodesData.enter().append("g")
       .attr("class", "node")
-      .attr("transform", d => `translate(${d.parent ? d.parent.x : d.x},${d.parent ? d.parent.y : d.y})`)
+      .attr("transform", d => `translate(${d.parent ? d.parent.px : d.px},${d.parent ? d.parent.py : d.py})`)
       .call(this.drag)
       .on("mouseenter", (event, d) => {
          this.showDuplicateLinks(event, d);
@@ -426,7 +538,7 @@ export class TreeRenderer {
     
     // 1. Cloak the group during the transform transition
     nodesMerge.transition(t)
-      .attr("transform", d => `translate(${d.x},${d.y})`)
+      .attr("transform", d => `translate(${d.px},${d.py})`)
       .style("opacity", d => d.data.isSystemRoot ? 0 : 1);
 
     // 2. Disable all physics/mouse interactions for the phantom root

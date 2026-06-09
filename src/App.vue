@@ -3,11 +3,14 @@
     <TopBar 
       :isDraftMode="isDraftMode" 
       :netState="netState"
+      :layoutMode="layoutMode"
       @switchMode="switchMode"
       @commitChanges="commitChanges"
       @initHost="initHost"
       @joinHost="joinHost"
       @updateUsername="(val) => netState.username = val"
+      @updateLayout="(val) => layoutMode = val"
+      @addDockedNode="openAddNodeModal"
     />
 
     <TreeCanvas 
@@ -15,9 +18,10 @@
       :isDraftMode="isDraftMode"
       :localPeerId="netState.peerId"
       :selectedIds="selectedIds"
+      :layoutMode="layoutMode"
       @node-selected="(payload) => toggleSelection(payload.d, payload.event.ctrlKey || payload.event.metaKey)"
       @node-moved="handleNodeMoved"
-      @add-floating-node="addFloatingNode"
+      @docked-node-placed="handleDockedNodePlaced"
     />
 
     <Toolbox 
@@ -43,6 +47,13 @@
       :initialName="renameModal.newName" 
       @close="renameModal.show = false" 
       @submit="submitRename" 
+    />
+
+    <RenameModal 
+      :show="addNodeModal.show" 
+      :initialName="'New Concept'" 
+      @close="addNodeModal.show = false" 
+      @submit="submitAddNode" 
     />
 
     <SplitModal 
@@ -122,19 +133,23 @@ const contextConflicts = computed(() => {
   return conflicts;
 });
 
+const layoutMode = ref('horizontal');
+
 // Modal States
 const renameModal = ref({ show: false, node: null, newName: '' });
 const splitModal = ref({ show: false, node: null });
 const multiMergeModal = ref({ show: false, parentOptions: [] });
+const addNodeModal = ref({ show: false });
 
 // Keyboard Shortcuts
 function handleGlobalKeydown(e) {
   // 1. Escape: Must run even if an input is focused to allow canceling out of text fields
   if (e.key === 'Escape') {
     if (renameModal.value.show) renameModal.value.show = false;
+    else if (addNodeModal.value.show) addNodeModal.value.show = false;
     else if (splitModal.value.show) splitModal.value.show = false;
     else if (multiMergeModal.value.show) multiMergeModal.value.show = false;
-    else clearSelection(); 
+    else clearSelection();
     
     if (document.activeElement) document.activeElement.blur();
     return;
@@ -294,10 +309,13 @@ function openRenameModal() {
 function submitRename(newName) {
   const n = renameModal.value.node;
   if (newName && newName !== n.name) { 
-    if (!n.conflicts) n.conflicts = [];
-    
-    // Never mutate n.name directly. 
-    n.conflicts.push({ id: generateId(), type: 'rename', value: newName, by: netState.username });
+    if (n.isDocked) {
+      n.name = newName;
+      n.action = 'renamed';
+    } else {
+      if (!n.conflicts) n.conflicts = [];
+      n.conflicts.push({ id: generateId(), type: 'rename', value: newName, by: netState.username });
+    }
     
     if (isDraftMode.value) n._isDraft = true; 
     applyChange(); 
@@ -341,11 +359,17 @@ function restoreNode() {
   applyChange();
 }
 
-function addFloatingNode() {
+function openAddNodeModal() {
+  addNodeModal.value.show = true;
+}
+
+function submitAddNode(newName) {
+  const nodeName = newName && newName.trim() ? newName.trim() : "New Concept";
   const newNode = {
     id: generateId(),
-    name: "New Floating Concept",
+    name: nodeName,
     action: 'added',
+    isDocked: true, // Structural flag for unplaced nodes
     lastEditedBy: netState.username,
     _isDraft: isDraftMode.value ? true : undefined,
   };
@@ -367,6 +391,48 @@ function addFloatingNode() {
     activeData.value.children.push(newNode);
   }
   
+  applyChange();
+  addNodeModal.value.show = false;
+}
+
+function handleDockedNodePlaced({ draggedNode, targetNode }) {
+  const sourceId = draggedNode.id;
+  let extractedNode = null;
+
+  const extractAndRemove = (node) => {
+    if (!node.children) return false;
+    for (let i = 0; i < node.children.length; i++) {
+      if (node.children[i].id === sourceId) {
+        extractedNode = node.children[i];
+        node.children.splice(i, 1);
+        return true;
+      }
+      if (extractAndRemove(node.children[i])) return true;
+    }
+    return false;
+  };
+
+  extractAndRemove(activeData.value);
+  if (!extractedNode) return;
+
+  delete extractedNode.isDocked;
+  extractedNode.action = 'moved';
+  extractedNode.lastEditedBy = netState.username;
+
+  if (targetNode) {
+    if (!canEditNode(targetNode.data, netState.peerId)) {
+      extractedNode.isDocked = true;
+      activeData.value.children.push(extractedNode);
+      applyChange();
+      throw new Error('Target node is locked by another peer.');
+    }
+    if (!targetNode.data.children) targetNode.data.children = [];
+    targetNode.data.children.push(extractedNode);
+  } else {
+    if (!activeData.value.children) activeData.value.children = [];
+    activeData.value.children.push(extractedNode);
+  }
+
   applyChange();
 }
 
@@ -711,30 +777,72 @@ function executeResolution(option, conflict, node) {
       liveTreeData.value = targetParent;
     }
 
-    if (conflict.ghostIds && targetParent.children) {
-      conflict.ghostIds.forEach(gId => {
+    // Check if the user is accepting via a specific ghost node vs the original source node
+    const selectedId = Array.from(selectedIds.value)[0];
+    const targetGhostIndex = conflict.ghostIds ? conflict.ghostIds.indexOf(selectedId) : -1;
+    
+    // Cache the immutable array to prevent history destruction during sequential array splicing
+    if (!conflict.originalNames) conflict.originalNames = [...conflict.newNames];
+    const historicalSplitTree = { name: liveNode.name, children: conflict.originalNames.map(n => ({ name: n })) };
+
+    if (targetGhostIndex !== -1) {
+      // User selected a specific ghost node (one of the proposed split ones)
+      const gId = conflict.ghostIds[targetGhostIndex];
+      const gName = conflict.newNames[targetGhostIndex];
+
+      // 1. Remove the specific ghost from the UI
+      if (targetParent.children) {
         const gIdx = targetParent.children.findIndex(c => c.id === gId);
         if (gIdx > -1) targetParent.children.splice(gIdx, 1);
-      });
-    }
-    
-    const historicalSplitTree = { name: liveNode.name, children: conflict.newNames.map(n => ({ name: n })) };
-    
-    if (!conflict.keepOriginal) {
-      const idx = targetParent.children.findIndex(c => c.id === liveNode.id);
-      if (idx > -1) targetParent.children.splice(idx, 1);
-    } else {
-      liveNode.splitStructure = historicalSplitTree;
-      liveNode.splitFrom = liveNode.name; 
-      if (!liveParent) targetParent.children.push(liveNode); // Explicitly attach if we made a new root
-    }
+      }
 
-    conflict.newNames.forEach(name => {
+      // 2. Add the permanent resolved node
       targetParent.children.push({
-        id: generateId(), name: name, action: 'added', lastEditedBy: netState.username,
+        id: generateId(), name: gName, action: 'added', lastEditedBy: netState.username,
         splitFrom: liveNode.name, splitStructure: historicalSplitTree
       });
-    });
+
+      // 3. Mutate the conflict array to remove this fragment
+      conflict.ghostIds.splice(targetGhostIndex, 1);
+      conflict.newNames.splice(targetGhostIndex, 1);
+
+      // 4. If fragments remain, restore the conflict to the host. Otherwise, delete the host.
+      if (conflict.ghostIds.length > 0) {
+        liveNode.conflicts.push(conflict); // Re-attach conflict since it was stripped at the top of executeResolution
+      } else {
+        if (!conflict.keepOriginal) {
+          const idx = targetParent.children.findIndex(c => c.id === liveNode.id);
+          if (idx > -1) targetParent.children.splice(idx, 1);
+        } else {
+          liveNode.splitStructure = historicalSplitTree;
+          liveNode.splitFrom = liveNode.name; 
+        }
+      }
+    } else {
+      // User selected the node being split
+      if (conflict.ghostIds && targetParent.children) {
+        conflict.ghostIds.forEach(gId => {
+          const gIdx = targetParent.children.findIndex(c => c.id === gId);
+          if (gIdx > -1) targetParent.children.splice(gIdx, 1);
+        });
+      }
+      
+      if (!conflict.keepOriginal) {
+        const idx = targetParent.children.findIndex(c => c.id === liveNode.id);
+        if (idx > -1) targetParent.children.splice(idx, 1);
+      } else {
+        liveNode.splitStructure = historicalSplitTree;
+        liveNode.splitFrom = liveNode.name; 
+        if (!liveParent) targetParent.children.push(liveNode); // Explicitly attach if we made a new root
+      }
+
+      conflict.newNames.forEach(name => {
+        targetParent.children.push({
+          id: generateId(), name: name, action: 'added', lastEditedBy: netState.username,
+          splitFrom: liveNode.name, splitStructure: historicalSplitTree
+        });
+      });
+    }
   }
 
   // --- MERGE RESOLUTION ---
