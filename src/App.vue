@@ -805,7 +805,11 @@ function executeResolution(option, conflict, node) {
     
     // Cache the immutable array to prevent history destruction during sequential array splicing
     if (!conflict.originalNames) conflict.originalNames = [...conflict.newNames];
-    const historicalSplitTree = { name: liveNode.name, children: conflict.originalNames.map(n => ({ name: n })) };
+    const historicalSplitTree = { 
+      id: generateId(),
+      name: liveNode.name, 
+      children: conflict.originalNames.map(n => ({ id: generateId(), name: n })) 
+    };
 
     if (targetGhostIndex !== -1) {
       // User selected a specific ghost node (one of the proposed split ones)
@@ -887,6 +891,7 @@ function executeResolution(option, conflict, node) {
 
       if (sourceParent && sourceData) {
         liveNode.mergedStructure.source.children.push({
+          id: generateId(),
           name: sourceData.name,
           children: sourceData.children ? cloneNode(sourceData, netState.username).children : []
         });
