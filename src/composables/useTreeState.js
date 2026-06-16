@@ -2,7 +2,7 @@
 // It handles the conflict resolution execution matrix.
 
 import { ref, computed, onMounted, onUnmounted } from 'vue';
-import { sharedTree, applyNetworkUpdate, encodeCurrentState, updateSharedTreeRoot, getSharedTreeJSON } from '../services/crdt.service.js';
+import { sharedTree, applyNetworkUpdate, applyHostState, encodeCurrentState, updateSharedTreeRoot, getSharedTreeJSON } from '../services/crdt.service.js';
 import { webrtcService, DEBUG_NETWORK } from '../services/webrtc.service.js';
 import { removeDraftFlag, tagGlobalDuplicates} from '../utils/helpers.js';
 
@@ -36,20 +36,17 @@ function syncFromNetwork() {
 
     webrtcService.addEventListener('client-joined', (e) => {
       if (netState.isHost) {
-        // Extract pure JSON to prevent MessagePack Map() serialization crashes
-        const safePayload = getSharedTreeJSON();
-        webrtcService.sendToPeer(e.detail, { type: 'WELCOME_SYNC', payload: safePayload });
-        
-        // Send the underlying Yjs binary to align vector clocks
-        webrtcService.sendToPeer(e.detail, encodeCurrentState());
+        webrtcService.sendToPeer(e.detail, { 
+          type: 'WELCOME_SYNC', 
+          payload: encodeCurrentState() 
+        });
       }
     });
 
     webrtcService.addEventListener('welcome-sync', (e) => {
       if (!netState.isHost) {
-        // Manually trigger a local transaction with the Host's exact data to "win" the state
-        updateSharedTreeRoot(e.detail);
-        syncFromNetwork();
+        netState.isReady = true;
+        applyHostState(e.detail);
       }
     });
   }

@@ -320,20 +320,32 @@ export class TreeRenderer {
       const dy = d.target.py - d.source.py;
       const dist = Math.sqrt(dx * dx + dy * dy);
       
-      if (dist < NODE_DIMENSIONS.width * 1.2) return edgeLinkGen(d);
+      if (dist < NODE_DIMENSIONS.width * 1.2 && d.type !== 'split-proposal') return edgeLinkGen(d);
 
-      const dr = dist * 1.1; 
+      let dr = dist * 1.1; 
       let startPoint = [d.source.px, d.source.py];
       let endPoint = [d.target.px, d.target.py];
       let sweep = dx > 0 ? 0 : 1;
 
       if (this.ctx.layoutMode === 'vertical') {
         startPoint[0] += NODE_DIMENSIONS.width / 2;
-        endPoint[0] -= NODE_DIMENSIONS.width / 2;
-        sweep = dy > 0 ? 1 : 0;
+        if (d.type === 'split-proposal') {
+          endPoint[0] += NODE_DIMENSIONS.width / 2;
+          dr = Math.max(80, Math.abs(dy) * 0.8);
+          sweep = dy > 0 ? 1 : 0; 
+        } else {
+          endPoint[0] -= NODE_DIMENSIONS.width / 2;
+          sweep = dy > 0 ? 1 : 0;
+        }
       } else if (this.ctx.layoutMode === 'horizontal') {
         startPoint[1] += NODE_DIMENSIONS.height / 2;
-        endPoint[1] -= NODE_DIMENSIONS.height / 2;
+        if (d.type === 'split-proposal') {
+          endPoint[1] += NODE_DIMENSIONS.height / 2;
+          dr = Math.max(80, Math.abs(dx) * 0.8);
+          sweep = dx > 0 ? 0 : 1; 
+        } else {
+          endPoint[1] -= NODE_DIMENSIONS.height / 2;
+        }
       }
       
       return `M${startPoint[0]},${startPoint[1]} A${dr},${dr} 0 0,${sweep} ${endPoint[0]},${endPoint[1]}`;
@@ -434,11 +446,11 @@ export class TreeRenderer {
         if (d.type === 'split-proposal') return "#e91e63"; 
         return "#ff9800";
       })
-      .attr("d", d => d.type === 'split-proposal' ? edgeLinkGen(d) : getUnderArcPath(d));
+      .attr("d", getUnderArcPath);
 
     cLinksEnter.merge(cLinks)
       .transition(t)
-      .attr("d", d => d.type === 'split-proposal' ? edgeLinkGen(d) : getUnderArcPath(d));
+      .attr("d", getUnderArcPath);
 
     // --- 3. Regular Links ---
     const links = linksLayer.selectAll(".link").data(root.links(), d => d.source.data.id + "-link-" + d.target.data.id);
@@ -551,14 +563,19 @@ export class TreeRenderer {
 
     // 3. Standard node styling
     nodesMerge.select("rect")
-      .attr("stroke", d => this.ctx.selectedIds.has(d.data.id) ? "#1a73e8" : this.getStrokeColor(d.data))
+      .attr("stroke", d => {
+        if (this.ctx.selectedIds.has(d.data.id)) return "#1a73e8";
+        if (d.ancestors().some(a => a !== d && a.data.conflicts?.some(c => c.type === 'delete' && c.cascade))) return "#ff9800";
+        return this.getStrokeColor(d.data);
+      })
       .attr("stroke-width", d => {
         if (this.ctx.selectedIds.has(d.data.id)) return 4;
-        return (d.data.locked || d.data.action || d.data.conflicts?.length || (this.ctx.isDraftMode && d.data._isDraft)) ? 3 : 2;
+        const isCascadePending = d.ancestors().some(a => a !== d && a.data.conflicts?.some(c => c.type === 'delete' && c.cascade));
+        return (isCascadePending || d.data.locked || d.data.action || d.data.conflicts?.length || (this.ctx.isDraftMode && d.data._isDraft)) ? 3 : 2;
       })
       .style("opacity", d => d.data.isGhost ? 0.3 : 1)
       .attr("fill", d => {
-        const isPendingDelete = d.data.conflicts?.some(c => c.type === 'delete');
+        const isPendingDelete = d.ancestors().some(a => a.data.conflicts?.some(c => c.type === 'delete' && (c.cascade || a === d)));
         return isPendingDelete ? "#ffebee" : "#ffffff";
       });
 
@@ -577,9 +594,13 @@ export class TreeRenderer {
     nodesMerge.select(".node-meta-container").html(d => {
       let html = "";
       
+      const isCascadePending = d.ancestors().some(a => a !== d && a.data.conflicts?.some(c => c.type === 'delete' && c.cascade));
+      
       if (d.data.conflicts?.length) {
         const count = d.data.conflicts.length;
         html += `<div style="color: #ff9800; font-size: 10px; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; letter-spacing: 0.5px;">[${count} PROPOSAL${count > 1 ? 'S' : ''}]</div>`;
+      } else if (isCascadePending) {
+        html += `<div style="color: #f44336; font-size: 10px; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; letter-spacing: 0.5px;">[CASCADE DELETE]</div>`;
       }
 
       let userText = d.data.isGhost ? "Proposed State" : "";

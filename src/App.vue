@@ -13,34 +13,42 @@
       @addDockedNode="openAddNodeModal"
     />
 
-    <TreeCanvas 
-      :treeData="activeData"
-      :isDraftMode="isDraftMode"
-      :localPeerId="netState.peerId"
-      :selectedIds="selectedIds"
-      :layoutMode="layoutMode"
-      @node-selected="(payload) => toggleSelection(payload.d, payload.event.ctrlKey || payload.event.metaKey)"
-      @node-moved="handleNodeMoved"
-      @docked-node-placed="handleDockedNodePlaced"
-    />
+    <template v-if="netState.isReady || netState.status === 'disconnected'">
+      <TreeCanvas 
+        :treeData="activeData"
+        :isDraftMode="isDraftMode"
+        :localPeerId="netState.peerId"
+        :selectedIds="selectedIds"
+        :layoutMode="layoutMode"
+        @node-selected="(payload) => toggleSelection(payload.d, payload.event.ctrlKey || payload.event.metaKey)"
+        @node-moved="handleNodeMoved"
+        @docked-node-placed="handleDockedNodePlaced"
+      />
 
-    <Toolbox 
-      :selectedNodes="selectedNodes"
-      :isSingleLeafSelected="isSingleLeafSelected"
-      :localPeerId="netState.peerId"
-      :contextConflicts="contextConflicts"
-      @rename="openRenameModal"
-      @addChild="addChild"
-      @split="openSplitModal"
-      @toggleLock="toggleLock"
-      @delete="deleteNode"
-      @restore="restoreNode"
-      @multiMerge="openMultiMergeModal"
-      @acceptAllMerges="(hostId) => acceptAllMerges(hostId)"
-      @acceptConflict="acceptConflict"
-      @discardAllMerges="(hostId) => discardAllMerges(hostId)" 
-      @discardConflict="discardConflict" 
-    />
+      <Toolbox 
+        :selectedNodes="selectedNodes"
+        :isSingleLeafSelected="isSingleLeafSelected"
+        :localPeerId="netState.peerId"
+        :contextConflicts="contextConflicts"
+        @rename="openRenameModal"
+        @addChild="addChild"
+        @split="openSplitModal"
+        @toggleLock="toggleLock"
+        @delete="deleteNode"
+        @restore="restoreNode"
+        @multiMerge="openMultiMergeModal"
+        @acceptAllMerges="(hostId) => acceptAllMerges(hostId)"
+        @acceptConflict="acceptConflict"
+        @discardAllMerges="(hostId) => discardAllMerges(hostId)" 
+        @discardConflict="discardConflict" 
+      />
+    </template>
+
+    <div v-else class="modal-overlay">
+      <div class="modal-content" style="width: auto; text-align: center; font-weight: 600; color: #5f6368;">
+        Synchronizing canonical state...
+      </div>
+    </div>
 
     <RenameModal 
       :show="renameModal.show" 
@@ -336,11 +344,16 @@ function deleteNode() {
   const validNodes = selectedNodes.value.filter(n => canEditNode(n.data, netState.peerId));
   if (validNodes.length === 0) return;
   
-  deleteModal.value = { 
-    show: true, 
-    nodes: validNodes, 
-    name: validNodes.length === 1 ? validNodes[0].data.name : `${validNodes.length} nodes`
-  };
+  const hasChildren = validNodes.some(n => n.data.children && n.data.children.length > 0);
+  
+  deleteModal.value.nodes = validNodes;
+  
+  if (hasChildren) {
+    deleteModal.value.name = validNodes.length === 1 ? validNodes[0].data.name : `${validNodes.length} nodes`;
+    deleteModal.value.show = true;
+  } else {
+    confirmDelete({ cascade: false });
+  }
 }
 
 function confirmDelete(payload) {

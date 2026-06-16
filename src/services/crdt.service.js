@@ -3,8 +3,24 @@
 import * as Y from 'yjs';
 import { DEBUG_NETWORK } from './webrtc.service.js';
 
-export const ydoc = new Y.Doc();
-export const sharedTree = ydoc.getMap('treeData');
+export let ydoc = new Y.Doc();
+export let sharedTree = ydoc.getMap('treeData');
+
+export function applyHostState(updatePayload) {
+  try {
+    // Annihilate local vector clocks to prevent parallel initialization collisions
+    ydoc = new Y.Doc();
+    sharedTree = ydoc.getMap('treeData');
+    
+    const update = new Uint8Array(updatePayload);
+    Y.applyUpdate(ydoc, update, 'network');
+    
+    if (DEBUG_NETWORK) console.log(`[CRDT: Host Override Success] Replaced local CRDT document. Size: ${update.byteLength}b`);
+    window.dispatchEvent(new Event('tree-updated'));
+  } catch (error) {
+    console.error("[CRDT: Host Override Failure] Failed to reconstruct document:", error);
+  }
+}
 
 export function applyNetworkUpdate(updatePayload) {
   try {

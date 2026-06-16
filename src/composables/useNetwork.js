@@ -6,6 +6,7 @@ import { webrtcService } from '../services/webrtc.service.js';
 export function useNetwork() {
   const netState = reactive({
     isHost: false,
+    isReady: false,
     peerId: null,
     username: 'User-' + Math.floor(Math.random() * 1000),
     status: 'disconnected',
@@ -19,6 +20,7 @@ export function useNetwork() {
     webrtcService.addEventListener('host-opened', (e) => {
       netState.peerId = e.detail;
       netState.isHost = true;
+      netState.isReady = true;
       netState.status = 'connected';
       netState.lastMessage = "Room created successfully.";
     });
