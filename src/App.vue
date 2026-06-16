@@ -771,11 +771,6 @@ function executeResolution(option, conflict, node) {
   // --- MOVE RESOLUTION ---
   else if (act === 'move-node') {
     const targetParent = root.descendants().find(n => n.data.id === conflict.targetId);
-    
-    if (targetParent && targetParent.ancestors().some(a => a.data.id === liveNode.id)) {
-      liveNode.conflicts.push(conflict);
-      return alert("Resolution rejected: Executing this move creates a structural cycle. Discard the proposal.");
-    }
 
     if (targetParent && liveParent) {
       const idx = liveParent.children.findIndex(c => c.id === liveNode.id);
@@ -884,8 +879,6 @@ function executeResolution(option, conflict, node) {
       : [conflict]; 
     
     if (!liveNode.mergedStructure) liveNode.mergedStructure = { source: { children: [] } };
-    
-    const liveNodeD3 = root.descendants().find(n => n.data.id === liveNode.id);
 
     mergesToProcess.forEach(mConf => {
       let sourceParent = null, sourceData = null;
@@ -897,11 +890,6 @@ function executeResolution(option, conflict, node) {
       });
 
       if (sourceParent && sourceData) {
-        if (liveNodeD3 && liveNodeD3.ancestors().some(a => a.data.id === sourceData.id)) {
-          liveNode.conflicts.push(mConf);
-          alert(`Merge rejected: Consolidating '${sourceData.name}' into '${liveNode.name}' creates a structural cycle. Discard the proposal.`);
-          return;
-        }
 
         liveNode.mergedStructure.source.children.push({
           id: generateId(),
@@ -954,14 +942,30 @@ function forceGlobalSync() {
 
 function cleanupOrphanedArtifacts() {
   const root = d3.hierarchy(liveTreeData.value);
+  const nodeMap = new Map();
   const validGhostIds = new Set();
   const allCurrentIds = new Set();
   const activeMergeSourceIds = new Set(); 
 
-  // 1. Build an index of all current nodes and collect active ghosts
   root.each(n => {
+    nodeMap.set(n.data.id, n);
     allCurrentIds.add(n.data.id);
+  });
+
+  root.each(n => {
     if (n.data.conflicts) {
+      n.data.conflicts = n.data.conflicts.filter(c => {
+        if (c.type === 'move-proposal') {
+          const targetNode = nodeMap.get(c.targetId);
+          if (targetNode && targetNode.ancestors().some(a => a.data.id === n.data.id)) return false;
+        }
+        if (c.type === 'merge-proposal') {
+          const sourceNode = nodeMap.get(c.sourceId);
+          if (sourceNode && n.ancestors().some(a => a.data.id === sourceNode.data.id)) return false;
+        }
+        return true;
+      });
+
       n.data.conflicts.forEach(c => {
         if (c.type === 'split-proposal' && c.ghostIds) c.ghostIds.forEach(id => validGhostIds.add(id));
         if (c.type === 'move-proposal' && c.ghostId) validGhostIds.add(c.ghostId);
@@ -973,12 +977,9 @@ function cleanupOrphanedArtifacts() {
   function traverseAndClean(parentData) {
     if (!parentData.children) return;
     parentData.children = parentData.children.filter(child => {
-      // Delete ghosts belonging to rejected/completed split or move proposals
       if (child.isGhost && !validGhostIds.has(child.id)) return false;
 
-      // COMPETITIVE MERGE INVALIDATION
       if (child.conflicts && child.conflicts.some(c => c.type === 'merge-proposal')) {
-        // Evaluate merge sources individually rather than failing the whole node
         const validConflicts = [];
         
         child.conflicts.forEach(c => {
@@ -995,7 +996,6 @@ function cleanupOrphanedArtifacts() {
         child.conflicts = validConflicts;
         const remainingMerges = child.conflicts.filter(c => c.type === 'merge-proposal');
         
-        // If the node hasn't been structurally merged yet and loses all valid sources, prune it safely
         if (remainingMerges.length === 0 && !child.mergedStructure) {
           return false; 
         }
@@ -1006,7 +1006,7 @@ function cleanupOrphanedArtifacts() {
   }
   
   traverseAndClean(liveTreeData.value);
-  }
+}
 </script>
 
 <style>
