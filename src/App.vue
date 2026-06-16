@@ -71,6 +71,13 @@
       @submit="confirmMultiMerge" 
     />
 
+    <DeleteModal 
+      :show="deleteModal.show" 
+      :nodeName="deleteModal.name" 
+      @close="deleteModal.show = false" 
+      @submit="confirmDelete" 
+    />
+
   </div>
 </template>
 
@@ -91,6 +98,7 @@ import TreeCanvas from './components/canvas/TreeCanvas.vue';
 import RenameModal from './components/ui/modals/RenameModal.vue';
 import SplitModal from './components/ui/modals/SplitModal.vue';
 import MergeModal from './components/ui/modals/MergeModal.vue';
+import DeleteModal from './components/ui/modals/DeleteModal.vue';
 
 // Services & Utils
 import { sharedTree, updateSharedTreeRoot, encodeCurrentState } from './services/crdt.service.js';
@@ -140,6 +148,7 @@ const renameModal = ref({ show: false, node: null, newName: '' });
 const splitModal = ref({ show: false, node: null });
 const multiMergeModal = ref({ show: false, parentOptions: [] });
 const addNodeModal = ref({ show: false });
+const deleteModal = ref({ show: false, nodes: [], name: '' });
 
 // Keyboard Shortcuts
 function handleGlobalKeydown(e) {
@@ -324,19 +333,26 @@ function submitRename(newName) {
 }
 
 function deleteNode() {
-  selectedNodes.value.forEach(n => {
+  const validNodes = selectedNodes.value.filter(n => canEditNode(n.data, netState.peerId));
+  if (validNodes.length === 0) return;
+  
+  deleteModal.value = { 
+    show: true, 
+    nodes: validNodes, 
+    name: validNodes.length === 1 ? validNodes[0].data.name : `${validNodes.length} nodes`
+  };
+}
 
-    if (!canEditNode(n.data, netState.peerId)) return;
-    
+function confirmDelete(payload) {
+  const { cascade } = payload;
+  deleteModal.value.nodes.forEach(n => {
     if (!n.data.conflicts) n.data.conflicts = [];
-    
-    // Defer physical deletion to the resolution matrix
-    n.data.conflicts.push({ id: generateId(), type: 'delete', by: netState.username });
-    
+    n.data.conflicts.push({ id: generateId(), type: 'delete', by: netState.username, cascade });
     if (isDraftMode.value) n.data._isDraft = true;
   });
-  selectedNodes.value = []; 
+  selectedNodes.value = [];
   applyChange();
+  deleteModal.value.show = false;
 }
 
 function restoreNode() {
@@ -699,8 +715,6 @@ function executeResolution(option, conflict, node) {
 
   // --- DELETE RESOLUTION ---
   if (act === 'delete-node') {
-    // 1. Capture the historical structure and generate FRESH IDs to satisfy the CRDT array mapping 
-    // without colliding with the live nodes (especially if children are hoisted).
     const historicalRecord = {
       id: generateId(), 
       name: liveNode.name,
@@ -710,31 +724,26 @@ function executeResolution(option, conflict, node) {
       children: liveNode.children ? JSON.parse(JSON.stringify(liveNode.children)) : []
     };
     
-    // Scramble the IDs of the historical children so they don't collide with hoisted active nodes
     if (historicalRecord.children.length > 0) {
       historicalRecord.children.forEach(addUUIDs);
     }
 
     if (!liveParent) {
-      // Root Node Deletion: Swap to Canvas Root and store history on the floor
       liveTreeData.value = {
         id: generateId(),
         name: "Canvas Root",
         isSystemRoot: true,
-        children: liveNode.children ? JSON.parse(JSON.stringify(liveNode.children)) : [],
+        children: (!conflict.cascade && liveNode.children) ? JSON.parse(JSON.stringify(liveNode.children)) : [],
         deletedChildren: [historicalRecord]
       };
     } else {
-      // Standard Deletion: Append history to parent
       if (!liveParent.deletedChildren) liveParent.deletedChildren = [];
       liveParent.deletedChildren.push(historicalRecord);
 
-      // Sever the child
       const idx = liveParent.children.findIndex(c => c.id === liveNode.id);
       if (idx > -1) liveParent.children.splice(idx, 1);
       
-      // System Root Cascade: If deleting a floating node, hoist its children to the floor
-      if (liveParent.isSystemRoot && liveNode.children) {
+      if (!conflict.cascade && liveNode.children) {
         liveNode.children.forEach(child => liveParent.children.push(child));
       }
     }
