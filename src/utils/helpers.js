@@ -12,6 +12,9 @@ export function cloneNode(node, username) {
     lastEditedBy: username 
   };
   delete cloned.groupId; 
+  delete cloned.conflicts;
+  delete cloned.locked;
+  delete cloned.lockedBy;
   if (node.children) {
     cloned.children = node.children.map(c => cloneNode(c, username));
   }
