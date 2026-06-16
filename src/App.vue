@@ -771,6 +771,12 @@ function executeResolution(option, conflict, node) {
   // --- MOVE RESOLUTION ---
   else if (act === 'move-node') {
     const targetParent = root.descendants().find(n => n.data.id === conflict.targetId);
+    
+    if (targetParent && targetParent.ancestors().some(a => a.data.id === liveNode.id)) {
+      liveNode.conflicts.push(conflict);
+      return alert("Resolution rejected: Executing this move creates a structural cycle. Discard the proposal.");
+    }
+
     if (targetParent && liveParent) {
       const idx = liveParent.children.findIndex(c => c.id === liveNode.id);
       liveParent.children.splice(idx, 1);
@@ -873,13 +879,14 @@ function executeResolution(option, conflict, node) {
 
   // --- MERGE RESOLUTION ---
   else if (act.includes('merge')) {
-    // Process all merges only if n-merges, otherwise process the specifically accepted one
     const mergesToProcess = act === 'n-merges' 
       ? cachedConflicts.filter(c => c.type === 'merge-proposal')
       : [conflict]; 
     
     if (!liveNode.mergedStructure) liveNode.mergedStructure = { source: { children: [] } };
     
+    const liveNodeD3 = root.descendants().find(n => n.data.id === liveNode.id);
+
     mergesToProcess.forEach(mConf => {
       let sourceParent = null, sourceData = null;
       root.each(n => {
@@ -890,6 +897,12 @@ function executeResolution(option, conflict, node) {
       });
 
       if (sourceParent && sourceData) {
+        if (liveNodeD3 && liveNodeD3.ancestors().some(a => a.data.id === sourceData.id)) {
+          liveNode.conflicts.push(mConf);
+          alert(`Merge rejected: Consolidating '${sourceData.name}' into '${liveNode.name}' creates a structural cycle. Discard the proposal.`);
+          return;
+        }
+
         liveNode.mergedStructure.source.children.push({
           id: generateId(),
           name: sourceData.name,
