@@ -29,6 +29,15 @@
         </svg>
       </button>
     </div>
+
+    <Minimap 
+      v-if="treeData"
+      :treeData="treeData" 
+      :currentTransform="currentTransform"
+      :layoutMode="layoutMode"
+      @update-transform="updateRendererTransform" 
+    />
+
     <svg ref="svgRef" width="100%" height="100%" @dblclick.self="handleCanvasDoubleClick"></svg>
     
     <div v-if="mergeTooltip.show" class="merge-tooltip" :style="{ top: mergeTooltip.y + 'px', left: mergeTooltip.x + 'px' }" v-html="mergeTooltip.html"></div>
@@ -38,6 +47,7 @@
 <script setup>
 import { ref, computed, onMounted, watch, onUnmounted } from 'vue';
 import { TreeRenderer } from '../../services/d3.renderer.js';
+import Minimap from './Minimap.vue';
 import * as d3 from 'd3';
 
 const props = defineProps({
@@ -85,6 +95,12 @@ const dockedNodes = computed(() => {
 const svgRef = ref(null);
 const mergeTooltip = ref({ show: false, x: 0, y: 0, html: '' });
 let renderer = null;
+
+const currentTransform = ref({ x: 0, y: 0, k: 1 });
+
+function updateRendererTransform(x, y, k) {
+  if (renderer) renderer.setTransform(x, y, k);
+}
 
 function recenter() {
   if (renderer && props.treeData) {
@@ -212,7 +228,10 @@ onMounted(() => {
     onSelect: (payload) => emit('node-selected', payload),
     onMove: (payload) => emit('node-moved', payload),
     onHover: handleHover,
-    onHoverLeave: handleHoverLeave
+    onHoverLeave: handleHoverLeave,
+    onZoom: (transform) => {
+      currentTransform.value = transform;
+    }
   });
   
   d3.select(svgRef.value).on("dblclick.zoom", null);

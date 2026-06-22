@@ -18,6 +18,13 @@ const ACTION_COLORS = {
 };
 
 export class TreeRenderer {
+
+  setTransform(x, y, k) {
+    if (!this.currentZoomBehavior) return;
+    const transform = d3.zoomIdentity.translate(x, y).scale(k);
+    this.svg.call(this.currentZoomBehavior.transform, transform);
+  }
+
   constructor(svgElement, callbacks) {
     this.svg = d3.select(svgElement);
     this.callbacks = callbacks; 
@@ -61,7 +68,12 @@ export class TreeRenderer {
 
       this.currentZoomBehavior = d3.zoom()
         .scaleExtent([0.1, 3])
-        .on("zoom", (e) => zoomG.attr("transform", e.transform));
+        .on("zoom", (e) => {
+          zoomG.attr("transform", e.transform);
+          if (this.callbacks.onZoom) {
+            this.callbacks.onZoom(e.transform);
+          }
+        });
       this.svg.call(this.currentZoomBehavior);
     }
   }
