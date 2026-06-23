@@ -33,7 +33,7 @@ const minimapSvg = ref(null);
 const treeGroup = ref(null);
 const viewRect = ref(null);
 
-const MINIMAP_SIZE = { width: 240, height: 160 };
+const MINIMAP_SIZE = { width: 360, height: 240 };
 const NODE_DIMENSIONS = { width: 110, height: 36 };
 
 let currentScale = 1;
@@ -135,7 +135,7 @@ function drawMinimap() {
     .attr('x2', d => d.target.px)
     .attr('y2', d => d.target.py)
     .attr('stroke', '#cfd8dc')
-    .attr('stroke-width', 1.5)
+    .attr('stroke-width', 0.5)
     .attr('vector-effect', 'non-scaling-stroke')
     .style('opacity', d => d.source.data.isSystemRoot ? 0 : 1);
 
@@ -147,7 +147,7 @@ function drawMinimap() {
     .attr('y', d => d.py - NODE_DIMENSIONS.height / 2)
     .attr('width', NODE_DIMENSIONS.width)
     .attr('height', NODE_DIMENSIONS.height)
-    .attr('rx', 8)
+    .attr('rx', 2)
     .attr('vector-effect', 'non-scaling-stroke')
     .attr('fill', d => {
       if (d.data.isSystemRoot) return 'none';
@@ -157,7 +157,7 @@ function drawMinimap() {
       if (d.data.isSystemRoot) return 'none';
       return d.data.conflicts?.length ? '#ff9800' : '#b0bec5';
     })
-    .attr('stroke-width', 1.5);
+    .attr('stroke-width', 0.75);
 
   updateViewport();
 }
