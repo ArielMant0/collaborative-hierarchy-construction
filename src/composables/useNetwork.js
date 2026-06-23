@@ -52,6 +52,10 @@ export function useNetwork() {
     webrtcService.addEventListener('error', (e) => {
       netState.lastMessage = `Error: ${e.detail.type || 'Unknown'}`;
     });
+    webrtcService.addEventListener('notification-received', (e) => {
+      netState.lastMessage = e.detail;
+      webrtcService.dispatchEvent(new CustomEvent('ui-toast-trigger', { detail: e.detail }));
+    });
   }
 
   onMounted(() => setupListeners());

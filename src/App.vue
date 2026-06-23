@@ -50,6 +50,14 @@
       </div>
     </div>
 
+    <div class="toast-container">
+      <transition-group name="toast">
+        <div v-for="notif in notifications" :key="notif.id" class="toast-notification">
+          {{ notif.message }}
+        </div>
+      </transition-group>
+    </div>
+
     <RenameModal 
       :show="renameModal.show" 
       :initialName="renameModal.newName" 
@@ -158,6 +166,18 @@ const multiMergeModal = ref({ show: false, parentOptions: [] });
 const addNodeModal = ref({ show: false });
 const deleteModal = ref({ show: false, nodes: [], name: '' });
 
+const notifications = ref([]);
+
+function addNotification(message) {
+  const id = Date.now() + Math.random();
+  notifications.value.push({ id, message });
+  
+  // Garbage collect the toast after 4 seconds
+  setTimeout(() => {
+    notifications.value = notifications.value.filter(n => n.id !== id);
+  }, 4000);
+}
+
 // Keyboard Shortcuts
 function handleGlobalKeydown(e) {
   // 1. Escape: Must run even if an input is focused to allow canceling out of text fields
@@ -240,6 +260,10 @@ onMounted(() => {
   }
   syncFromNetwork(); 
   window.addEventListener('keydown', handleGlobalKeydown);
+
+  webrtcService.addEventListener('ui-toast-trigger', (e) => {
+    addNotification(e.detail);
+  });
 });
 
 onUnmounted(() => {
@@ -271,7 +295,7 @@ function handleNodeMoved({ draggedNode, targetNode }) {
   targetData.children.push(ghostNode);
 
   if (!sourceData.conflicts) sourceData.conflicts = [];
-  
+
   sourceData.conflicts.push({
     id: generateId(),
     type: 'move-proposal',
@@ -281,6 +305,7 @@ function handleNodeMoved({ draggedNode, targetNode }) {
     by: netState.username
   });
 
+  webrtcService.sendNotification(`${netState.username} proposed move to '${targetData.name}'`, netState.isHost);
   applyChange();
 }
 
@@ -325,16 +350,18 @@ function openRenameModal() {
 
 function submitRename(newName) {
   const n = renameModal.value.node;
-  if (newName && newName !== n.name) { 
+  if (newName && newName !== n.name) {     
+    if (isDraftMode.value) n._isDraft = true; 
+
     if (n.isDocked) {
       n.name = newName;
       n.action = 'renamed';
     } else {
       if (!n.conflicts) n.conflicts = [];
       n.conflicts.push({ id: generateId(), type: 'rename', value: newName, by: netState.username });
+      webrtcService.sendNotification(`${netState.username} proposed rename to '${newName}'`, netState.isHost);
     }
-    
-    if (isDraftMode.value) n._isDraft = true; 
+
     applyChange(); 
   }
   renameModal.value.show = false;
@@ -363,7 +390,10 @@ function confirmDelete(payload) {
     n.data.conflicts.push({ id: generateId(), type: 'delete', by: netState.username, cascade });
     if (isDraftMode.value) n.data._isDraft = true;
   });
+
+  webrtcService.sendNotification(`${netState.username} proposed deletion of ${deleteModal.value.nodes.length} node(s)`, netState.isHost);
   selectedNodes.value = [];
+
   applyChange();
   deleteModal.value.show = false;
 }
@@ -512,6 +542,7 @@ function confirmSplit(payload) {
     by: netState.username 
   });
 
+  webrtcService.sendNotification(`${netState.username} proposed split into ${names.length} parts`, netState.isHost);
   applyChange();
   splitModal.value.show = false;
 }
@@ -618,6 +649,7 @@ function confirmMultiMerge(payload) {
   if (!targetParentData.children) targetParentData.children = [];
   targetParentData.children.push(newNode);
   
+  webrtcService.sendNotification(`${netState.username} proposed merge of ${selectedNodes.value.length} nodes into '${newName}'`, netState.isHost);
   selectedNodes.value = [];
   applyChange();
   multiMergeModal.value.show = false;
@@ -677,6 +709,8 @@ function discardConflict(payload) {
     hostNode.conflicts = hostNode.conflicts.filter(c => c.id !== conflict.id);
   }
 
+  webrtcService.sendNotification(`${netState.username} discarded ${conflict.type.replace('-proposal', '')}`, netState.isHost);
+
   // Trigger GC to automatically destroy any ghost UI nodes that belonged to this proposal
   cleanupOrphanedArtifacts(); 
   forceGlobalSync();
@@ -695,7 +729,7 @@ function discardAllMerges(hostNodeId) {
   if (hostNode.conflicts) {
     hostNode.conflicts = hostNode.conflicts.filter(c => c.type !== 'merge-proposal');
   }
-
+  webrtcService.sendNotification(`${netState.username} discarded all merges`, netState.isHost);
   cleanupOrphanedArtifacts(); 
   forceGlobalSync();
 }
@@ -919,8 +953,11 @@ function executeResolution(option, conflict, node) {
   liveNode.lastEditedBy = netState.username;
   
   // 3. GLOBAL CLEANUP
-  cleanupOrphanedArtifacts(); 
-  
+  cleanupOrphanedArtifacts();
+
+  const actionName = option.action === 'n-merges' ? 'all merges' : option.action.split('-')[0];
+  webrtcService.sendNotification(`${netState.username} executed the ${actionName} proposal`, netState.isHost);
+
   // 4. FORCE SYNC AND REACTIVITY
   forceGlobalSync();
 }
@@ -1049,4 +1086,9 @@ body { margin: 0 !important; overflow: hidden !important; font-family: var(--fon
 .recenter-btn { position: absolute; top: 76px; right: 24px; z-index: 100; display: flex; padding: 8px; background: white; border: 1px solid #ccc; border-radius: 8px; color: #5f6368; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
 @keyframes slideUpToolbox { from { opacity: 0; transform: translate(-50%, 20px); } to { opacity: 1; transform: translate(-50%, 0); } }
 @keyframes slideUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+.toast-container {position: fixed; bottom: 24px; left: 24px; display: flex; flex-direction: column; gap: 8px; z-index: 3000; pointer-events: none; }
+.toast-notification { background: #1a73e8; color: #ffffff; padding: 12px 20px; border-radius: 8px; font-size: 13px; font-weight: 600; box-shadow: 0 4px 12px rgba(0,0,0,0.15); pointer-events: auto; }
+.toast-enter-active, .toast-leave-active { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+.toast-enter-from { opacity: 0; transform: translateX(-20px); }
+.toast-leave-to { opacity: 0; transform: translateY(20px); }
 </style>

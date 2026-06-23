@@ -541,22 +541,25 @@ export class TreeRenderer {
     nodesEnter.append("text").attr("class", "node-name").attr("dy", 1).attr("text-anchor", "middle").style("font-family", "system-ui, sans-serif").style("font-size", "10px").style("font-weight", "500");
     nodesEnter.append("text").attr("class", "lock-icon").attr("dy", -12).attr("dx", 55).style("font-size", "14px");
     
-    // Scalable foreignObject for layout underneath the node
-    nodesEnter.append("foreignObject")
-      .attr("class", "node-meta-fo")
-      .attr("width", NODE_DIMENSIONS.width + 40)
-      .attr("height", 60)
-      .attr("x", -(NODE_DIMENSIONS.width + 40) / 2)
-      .attr("y", NODE_DIMENSIONS.height / 2 + 2)
-      .append("xhtml:div")
-      .attr("class", "node-meta-container")
-      .style("display", "flex")
-      .style("flex-direction", "column")
-      .style("align-items", "center")
-      .style("text-align", "center")
-      .style("width", "100%")
-      .style("height", "100%")
-      .style("overflow", "hidden");
+    const badgeGroup = nodesEnter.append("g")
+      .attr("class", "notification-badge")
+      .attr("transform", `translate(${NODE_DIMENSIONS.width / 2}, ${-NODE_DIMENSIONS.height / 2})`)
+      .style("opacity", 0);
+
+    badgeGroup.append("circle")
+      .attr("r", 10)
+      .attr("fill", "#f44336")
+      .attr("stroke", "#ffffff")
+      .attr("stroke-width", 2);
+
+    badgeGroup.append("text")
+      .attr("class", "badge-count")
+      .attr("dy", "0.35em")
+      .attr("text-anchor", "middle")
+      .style("fill", "#ffffff")
+      .style("font-size", "10px")
+      .style("font-weight", "bold")
+      .style("pointer-events", "none");
 
     const nodesMerge = nodesEnter.merge(nodesData);
     
@@ -602,33 +605,11 @@ export class TreeRenderer {
     nodesMerge.select(".split-icon").style("opacity", d => d.data.splitFrom ? 1 : 0);
     nodesMerge.select(".delete-icon").style("opacity", d => d.data.deletedChildren?.length ? 1 : 0);
 
-    // Content Condensation via HTML injection
-    nodesMerge.select(".node-meta-container").html(d => {
-      let html = "";
-      
-      const isCascadePending = d.ancestors().some(a => a !== d && a.data.conflicts?.some(c => c.type === 'delete' && c.cascade));
-      
-      if (d.data.conflicts?.length) {
-        const count = d.data.conflicts.length;
-        html += `<div style="color: #ff9800; font-size: 10px; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; letter-spacing: 0.5px;">[${count} PROPOSAL${count > 1 ? 'S' : ''}]</div>`;
-      } else if (isCascadePending) {
-        html += `<div style="color: #f44336; font-size: 10px; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; letter-spacing: 0.5px;">[CASCADE DELETE]</div>`;
-      }
+    nodesMerge.select(".notification-badge")
+      .style("opacity", d => (d.data.conflicts && d.data.conflicts.length > 0) ? 1 : 0);
 
-      let userText = d.data.isGhost ? "Proposed State" : "";
-      if (!userText) {
-        if (d.data.lastEditedBy) userText += `✎ ${d.data.lastEditedBy}`;
-        if (d.data.action) userText += ` [${d.data.action.toUpperCase()}]`;
-        if (d.data.mergedFrom) userText += ` [MERGED]`;
-        if (d.data.splitFrom) userText += ` [SPLIT]`;
-      }
-
-      if (userText) {
-        html += `<div style="font-size: 8px; color: #5f6368; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; margin-top: 2px;">${userText}</div>`;
-      }
-
-      return html;
-    });
+    nodesMerge.select(".badge-count")
+      .text(d => (d.data.conflicts && d.data.conflicts.length > 0) ? d.data.conflicts.length : "");
 
     nodesMerge.each((d, i, nodes) => { this.nodeElements.set(d, d3.select(nodes[i])); });
 

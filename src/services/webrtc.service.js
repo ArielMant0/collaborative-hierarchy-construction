@@ -104,6 +104,14 @@ class WebRTCService extends EventTarget {
       } else if (data.type === 'WELCOME_SYNC') {
         // Intercept the forced state overwrite from the Host
         this.dispatchEvent(new CustomEvent('welcome-sync', { detail: data.payload }));
+      } else if (data.type === 'NOTIFICATION') {
+        // Intercept transient UI toasts
+        this.dispatchEvent(new CustomEvent('notification-received', { detail: data.message }));
+        
+        // If this node is the host, forward the notification to all OTHER clients
+        if (this.clientConnections.size > 0 && !data.fromHost) {
+          this.broadcast({ type: 'NOTIFICATION', message: data.message, fromHost: true }, conn.peer);
+        }
       }
       return;
     }
@@ -157,6 +165,17 @@ class WebRTCService extends EventTarget {
     } else if (this.hostConnection) {
       if (DEBUG_NETWORK) console.log(`[WebRTC: Outgoing Ping -> Host]`);
       this.hostConnection.send({ type: 'PING' });
+    }
+  }
+
+  sendNotification(message, isHost) {
+    const payload = { type: 'NOTIFICATION', message: message, fromHost: isHost };
+    
+    if (isHost) {
+      this.broadcast(payload);
+    } else if (this.hostConnection && this.hostConnection.open) {
+      if (DEBUG_NETWORK) console.log(`[WebRTC: Outgoing Notification -> Host]`);
+      this.hostConnection.send(payload);
     }
   }
 }
