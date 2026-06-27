@@ -25,6 +25,8 @@
         @node-selected="(payload) => toggleSelection(payload.d, payload.event.ctrlKey || payload.event.metaKey)"
         @node-moved="handleNodeMoved"
         @docked-node-placed="handleDockedNodePlaced"
+        @add-floating-node="createFloatingNode"
+        @floating-node-moved="handleFloatingNodeMoved"
       />
 
       <Toolbox 
@@ -347,6 +349,24 @@ function handleNodeMoved({ draggedNode, targetNode }) {
   applyChange();
 }
 
+function handleFloatingNodeMoved({ draggedNode, canvasX, canvasY }) {
+  const sourceData = draggedNode.data;
+  
+  if (!canEditNode(sourceData, netState.peerId)) {
+    return alert("Move rejected: Node is locked by another user.");
+  }
+
+  // Directly mutate the local canvas coordinates for the floating node
+  sourceData.canvasX = canvasX;
+  sourceData.canvasY = canvasY;
+  sourceData.lastEditedBy = netState.username;
+
+  // Because it's an absolute coordinate change on the canvas floor rather than a structural 
+  // hierarchy change, we bypass the proposal matrix and execute the coordinate shift directly.
+  logAction('Canvas Move', `Repositioned floating concept '${sourceData.name}'`);
+  applyChange();
+}
+
 function toggleLock() {
   const n = selectedNodes.value[0].data;
   if (n.locked && n.lockedBy !== netState.peerId) {
@@ -498,7 +518,7 @@ function submitAddNode(newName) {
   addNodeModal.value.show = false;
 }
 
-function handleDockedNodePlaced({ draggedNode, targetNode }) {
+function handleDockedNodePlaced({ draggedNode, targetNode, canvasX, canvasY }) {
   const sourceId = draggedNode.id;
   let extractedNode = null;
 
@@ -523,6 +543,9 @@ function handleDockedNodePlaced({ draggedNode, targetNode }) {
   extractedNode.lastEditedBy = netState.username;
 
   if (targetNode) {
+    delete extractedNode.canvasX;
+    delete extractedNode.canvasY;
+    
     if (!canEditNode(targetNode.data, netState.peerId)) {
       extractedNode.isDocked = true;
       activeData.value.children.push(extractedNode);
@@ -532,11 +555,61 @@ function handleDockedNodePlaced({ draggedNode, targetNode }) {
     if (!targetNode.data.children) targetNode.data.children = [];
     targetNode.data.children.push(extractedNode);
   } else {
-    if (!activeData.value.children) activeData.value.children = [];
-    activeData.value.children.push(extractedNode);
+    extractedNode.canvasX = canvasX;
+    extractedNode.canvasY = canvasY;
+    
+    // 1. If the canvas is still a strict top-down tree, automatically transition it into a Forest
+    if (!activeData.value.isSystemRoot) {
+      const legacyRoot = JSON.parse(JSON.stringify(activeData.value));
+      
+      // Wipe the reactive object without destroying the memory reference Vue relies on
+      for (let key in activeData.value) delete activeData.value[key];
+      
+      activeData.value.id = generateId();
+      activeData.value.name = "Canvas Root";
+      activeData.value.isSystemRoot = true;
+      activeData.value.children = [legacyRoot, extractedNode];
+    } else {
+      // 2. We already have an invisible canvas floor, just append the new node
+      if (!activeData.value.children) activeData.value.children = [];
+      activeData.value.children.push(extractedNode);
+    }
   }
 
   logAction('Place Concept', `Placed concept '${extractedNode.name}' into hierarchy`);
+  applyChange();
+}
+
+function createFloatingNode(payload) {
+  const { canvasX, canvasY } = payload || {};
+  const newNode = {
+    id: generateId(),
+    name: "New Concept",
+    action: 'added',
+    lastEditedBy: netState.username,
+    _isDraft: isDraftMode.value ? true : undefined,
+    canvasX: canvasX,
+    canvasY: canvasY
+  };
+
+  // 1. If the canvas is still a strict top-down tree, automatically transition it into a Forest
+  if (!activeData.value.isSystemRoot) {
+    const legacyRoot = JSON.parse(JSON.stringify(activeData.value));
+    
+    // Wipe the reactive object without destroying the memory reference Vue relies on
+    for (let key in activeData.value) delete activeData.value[key];
+    
+    activeData.value.id = generateId();
+    activeData.value.name = "Canvas Root";
+    activeData.value.isSystemRoot = true;
+    activeData.value.children = [legacyRoot, newNode];
+  } else {
+    // 2. We already have an invisible canvas floor, just append the new node
+    if (!activeData.value.children) activeData.value.children = [];
+    activeData.value.children.push(newNode);
+  }
+  
+  logAction('Add Concept', `Created floating concept directly on canvas`);
   applyChange();
 }
 

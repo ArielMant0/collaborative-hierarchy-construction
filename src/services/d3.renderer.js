@@ -143,10 +143,28 @@ export class TreeRenderer {
     const treeLayout = this.getLayout(root);
     treeLayout(root);
 
-    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
     root.each(d => {
       const [px, py] = this.project(d.x, d.y);
       d.px = px; d.py = py;
+    });
+
+    // Apply exact floating coordinates to the camera bounding box
+    if (root.data.isSystemRoot) {
+      root.children?.forEach(child => {
+        if (child.data.canvasX !== undefined && child.data.canvasY !== undefined) {
+          const deltaX = child.data.canvasX - child.px;
+          const deltaY = child.data.canvasY - child.py;
+          child.each(descendant => {
+            descendant.px += deltaX;
+            descendant.py += deltaY;
+          });
+        }
+      });
+    }
+
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    root.each(d => {
+      if (d.data.isSystemRoot) return; // Prevent invisible root from distorting the bounds
       if (d.px < x0) x0 = d.px;
       if (d.px > x1) x1 = d.px;
       if (d.py < y0) y0 = d.py;
@@ -340,7 +358,11 @@ export class TreeRenderer {
 
         if (droppedOnNode && renderer.callbacks.onMove) {
           renderer.callbacks.onMove({ draggedNode: d, targetNode: droppedOnNode });
+        } else if (d.parent && d.parent.data.isSystemRoot && renderer.callbacks.onCanvasDrop) {
+          // Free-floating node moved to a new absolute position on the canvas
+          renderer.callbacks.onCanvasDrop({ draggedNode: d, canvasX: event.x, canvasY: event.y });
         } else {
+          // Snaps back if it's a standard attached tree node dropped into the void
           renderer.render(renderer.lastData); 
         }
       });
@@ -385,6 +407,22 @@ export class TreeRenderer {
       const [px, py] = this.project(d.x, d.y);
       d.px = px; d.py = py;
     });
+
+    // --- 0. Intercept Floating Concepts ---
+    if (root.data.isSystemRoot) {
+      root.children?.forEach(child => {
+        if (child.data.canvasX !== undefined && child.data.canvasY !== undefined) {
+          const deltaX = child.data.canvasX - child.px;
+          const deltaY = child.data.canvasY - child.py;
+          
+          // Decouple from strict layout: Shift this floating root and its entire subtree
+          child.each(descendant => {
+            descendant.px += deltaX;
+            descendant.py += deltaY;
+          });
+        }
+      });
+    }
 
     const t = this.svg.transition().duration(400);
 

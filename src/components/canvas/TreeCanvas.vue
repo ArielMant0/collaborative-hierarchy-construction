@@ -58,10 +58,18 @@ const props = defineProps({
   layoutMode: String
 });
 
-const emit = defineEmits(['node-selected', 'node-moved', 'add-floating-node', 'docked-node-placed']);
+const emit = defineEmits(['node-selected', 'node-moved', 'add-floating-node', 'docked-node-placed', 'floating-node-moved']);
 
-function handleCanvasDoubleClick() {
-  emit('add-floating-node');
+function handleCanvasDoubleClick(event) {
+  const svgRect = svgRef.value.getBoundingClientRect();
+  const rawX = event.clientX - svgRect.left;
+  const rawY = event.clientY - svgRect.top;
+  
+  const transform = currentTransform.value;
+  const canvasX = (rawX - transform.x) / transform.k;
+  const canvasY = (rawY - transform.y) / transform.k;
+
+  emit('add-floating-node', { canvasX, canvasY });
 }
 
 let draggedDockedNode = null;
@@ -77,7 +85,15 @@ function handleCanvasDrop(event) {
 
   const targetNode = renderer.findNodeAtPosition(event.clientX, event.clientY);
   
-  emit('docked-node-placed', { draggedNode: draggedDockedNode, targetNode: targetNode });
+  const svgRect = svgRef.value.getBoundingClientRect();
+  const rawX = event.clientX - svgRect.left;
+  const rawY = event.clientY - svgRect.top;
+  
+  const transform = currentTransform.value;
+  const canvasX = (rawX - transform.x) / transform.k;
+  const canvasY = (rawY - transform.y) / transform.k;
+  
+  emit('docked-node-placed', { draggedNode: draggedDockedNode, targetNode: targetNode, canvasX, canvasY });
   draggedDockedNode = null;
 }
 
@@ -236,6 +252,7 @@ onMounted(() => {
   renderer = new TreeRenderer(svgRef.value, {
     onSelect: (payload) => emit('node-selected', payload),
     onMove: (payload) => emit('node-moved', payload),
+    onCanvasDrop: (payload) => emit('floating-node-moved', payload),
     onHover: handleHover,
     onHoverLeave: handleHoverLeave,
     onZoom: (transform) => {
