@@ -343,55 +343,71 @@ watch(() => [props.isDraftMode, props.localPeerId, props.selectedIds, showDelete
 }
 .docked-container {
   position: absolute;
-  top: 76px;
-  left: 50%;
-  transform: translateX(-50%);
+  top: 56px; /* Anchors exactly below the 56px TopBar */
+  left: 0;
+  right: 0;
+  width: 100%;
   background: rgba(255, 255, 255, 0.95);
   backdrop-filter: blur(8px);
-  border: 1px solid #e0e0e0;
-  border-radius: 12px;
-  padding: 16px;
+  border-bottom: 1px solid #e5e5e5; /* Blends as an extension of the header */
+  padding: 8px 24px;
   display: flex;
-  flex-direction: column;
-  gap: 12px;
-  z-index: 50;
-  max-height: 150px;
-  width: 60%;
-  overflow-y: auto;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+  align-items: center;
+  flex-direction: row; /* Transforms to horizontal layout */
+  gap: 16px;
+  z-index: 90; /* Slips right underneath the TopBar's z-index of 100 */
+  box-sizing: border-box;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.04);
 }
+
 .docked-header {
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
   color: #5f6368;
   letter-spacing: 0.5px;
+  white-space: nowrap; /* Prevents wrapping */
 }
+
 .docked-list {
   display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
+  flex-wrap: nowrap; /* Forces a strict single line */
+  overflow-x: auto; /* Enables horizontal staging scroll */
+  gap: 8px;
+  flex: 1; /* Consumes remaining width */
+  padding-bottom: 2px;
+  scrollbar-width: thin; /* Firefox support */
 }
+
+/* Custom sleek scrollbar for Webkit */
+.docked-list::-webkit-scrollbar {
+  height: 4px;
+}
+.docked-list::-webkit-scrollbar-thumb {
+  background: #dadce0;
+  border-radius: 4px;
+}
+
 .docked-node {
   background: white;
-  border: 2px solid #e0e0e0;
-  padding: 8px 16px;
-  border-radius: 20px;
-  font-size: 13px;
+  border: 1px solid #dadce0;
+  padding: 4px 12px; /* Compact internal spacing */
+  border-radius: 16px;
+  font-size: 12px;
   font-weight: 600;
-  color: #333;
-  cursor: pointer;
+  color: #202124;
+  cursor: grab; /* Improved drag affordance */
+  flex-shrink: 0; /* Prevents text truncation during flex compression */
   transition: all 0.2s ease;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.02);
 }
+
+.docked-node:active {
+  cursor: grabbing;
+}
+
 .docked-node:hover {
-  border-color: #b0bec5;
-  transform: translateY(-1px);
-}
-.docked-node.selected {
+  background: #f8f9fa;
   border-color: #1a73e8;
-  background: #e8f0fe;
-  color: #1a73e8;
 }
 
 .canvas-controls {
