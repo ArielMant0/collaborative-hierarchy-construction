@@ -117,7 +117,7 @@ export class TreeRenderer {
   getStrokeColor(data) {
     if (data.isGhost) return "#9e9e9e";
     
-    // Orange for ALL proposals (including pending deletions)
+    // Orange for ALL proposals (including pending deletions and severs)
     if (data.conflicts?.length) return "#ff9800"; 
     
     // Red for officially executed deletions via ACTION_COLORS.deleted
@@ -477,13 +477,14 @@ export class TreeRenderer {
     linksMerge.transition(t)
       .attr("stroke", d => {
         if (d.source.data.isSystemRoot) return "transparent"; // Sever visual anchor
+        if (d.target.data.conflicts?.some(c => c.type === 'sever-proposal')) return "#ff9800"; // Pending sever!
         if (d.target.data.isGhost) return COLORS.linkDefault;
         if (d.target.data.action === 'moved') return ACTION_COLORS.moved;
         if (d.target.data.action === 'added') return ACTION_COLORS.added; 
         return COLORS.linkDefault;
       })
-      .attr("stroke-width", 2)
-      .attr("stroke-dasharray", "none") 
+      .attr("stroke-width", d => d.target.data.conflicts?.some(c => c.type === 'sever-proposal') ? 3 : 2)
+      .attr("stroke-dasharray", d => d.target.data.conflicts?.some(c => c.type === 'sever-proposal') ? "5,5" : "none") 
       .style("opacity", d => d.source.data.isSystemRoot ? 0 : 1) // Guarantee invisibility
       .attr("d", edgeLinkGen);
 
@@ -591,7 +592,10 @@ export class TreeRenderer {
       .style("opacity", d => d.data.isGhost ? 0.3 : 1)
       .attr("fill", d => {
         const isPendingDelete = d.ancestors().some(a => a.data.conflicts?.some(c => c.type === 'delete' && (c.cascade || a === d)));
-        return isPendingDelete ? "#ffebee" : "#ffffff";
+        if (isPendingDelete) return "#ffebee";
+        
+        const isPendingSever = d.data.conflicts?.some(c => c.type === 'sever-proposal');
+        return isPendingSever ? "#fff3e0" : "#ffffff";
       });
 
     nodesMerge.select(".node-name")

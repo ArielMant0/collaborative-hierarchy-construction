@@ -11,6 +11,7 @@
         <button class="sleek-btn outline" :disabled="isLocked" :style="disabledActionStyle" @click="$emit('rename')">Rename</button>
         <button class="sleek-btn outline" :disabled="isLocked" :style="disabledActionStyle" @click="$emit('addChild')">Add Child</button>
         <button v-if="isSingleLeafSelected" class="sleek-btn outline" :disabled="isLocked" :style="disabledActionStyle" @click="$emit('split')">Split</button>
+        <button v-if="canSever" class="sleek-btn outline" :disabled="isLocked" :style="disabledActionStyle" @click="$emit('sever')">Sever</button>
         
         <!-- Unlock is the ONLY button that behaves differently -->
         <button class="sleek-btn outline" :disabled="isLocked && !canUnlock" :style="disabledUnlockStyle" @click="$emit('toggleLock')">{{ selectedNodes[0].data.locked ? 'Unlock' : 'Lock' }}</button>
@@ -92,7 +93,7 @@ const props = defineProps({
 
 defineEmits([
   'rename', 'addChild', 'split', 'toggleLock', 'delete', 
-  'restore', 'multiMerge', 
+  'restore', 'multiMerge', 'sever',
   'acceptAllMerges', 'acceptConflict',
   'discardAllMerges', 'discardConflict' 
 ]);
@@ -110,19 +111,26 @@ const canUnlock = computed(() => {
   return n.locked && n.lockedBy === props.localPeerId;
 });
 
-// 3. Pass all conflicts through. Deletions MUST remain visible to trigger the resolution matrix.
+// 3. Can the node be severed? (Must have a parent that isn't the system root)
+const canSever = computed(() => {
+  if (!props.selectedNodes || props.selectedNodes.length !== 1) return false;
+  const node = props.selectedNodes[0];
+  return node.parent && !node.parent.data.isSystemRoot;
+});
+
+// 4. Pass all conflicts through. Deletions MUST remain visible to trigger the resolution matrix.
 const displayableConflicts = computed(() => {
   return props.contextConflicts;
 });
 
-// 4. Strictly verify that the selected node is the ACTUAL host of the merges
+// 5. Strictly verify that the selected node is the ACTUAL host of the merges
 const hasLocalMultipleMerges = computed(() => {
   if (!props.selectedNodes || props.selectedNodes.length !== 1) return false;
   const selectedId = props.selectedNodes[0].data.id;
   return displayableConflicts.value.filter(c => c.conflict.type === 'merge-proposal' && c.hostNodeId === selectedId).length > 1;
 });
 
-// 5. Styling definitions
+// 6. Styling definitions
 const disabledActionStyle = computed(() => {
   return isLocked.value ? { opacity: 0.5, cursor: 'not-allowed', borderColor: '#dadce0', color: '#9aa0a6', background: 'transparent' } : {};
 });
@@ -144,6 +152,8 @@ function getConflictButtonLabel(conflict) {
     const destination = conflict.targetName ? ` to '${conflict.targetName}'` : '';
     return `Accept Move${destination}${author}`;
   }
+
+  if (conflict.type === 'sever-proposal') return `Accept Sever${author}`;
   
   if (conflict.type === 'delete') return `Accept Deletion${author}`;
   

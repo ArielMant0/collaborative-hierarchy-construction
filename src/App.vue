@@ -33,6 +33,7 @@
         @rename="openRenameModal"
         @addChild="addChild"
         @split="openSplitModal"
+        @sever="severNode"
         @toggleLock="toggleLock"
         @delete="deleteNode"
         @restore="restoreNode"
@@ -495,6 +496,25 @@ function handleDockedNodePlaced({ draggedNode, targetNode }) {
   applyChange();
 }
 
+function severNode() {
+  const n = selectedNodes.value[0];
+  if (!canEditNode(n.data, netState.peerId)) return alert("Node is locked!");
+  
+  // Guard against severing the root or already floating nodes
+  if (!n.parent || n.parent.data.isSystemRoot) return alert("Node is already severed.");
+
+  if (!n.data.conflicts) n.data.conflicts = [];
+  
+  n.data.conflicts.push({
+    id: generateId(),
+    type: 'sever-proposal',
+    by: netState.username
+  });
+
+  webrtcService.sendNotification(`${netState.username} proposed severing '${n.data.name}'`, netState.isHost);
+  applyChange();
+}
+
 // 4. Split & Merge Engine
 function openSplitModal() {
   const n = selectedNodes.value[0];
@@ -670,7 +690,8 @@ function acceptConflict(payload) {
 
   const actionMap = {
     'delete': 'delete-node', 'rename': 'rename-node', 'move-proposal': 'move-node',
-    'split-proposal': 'split-replace', 'merge-proposal': 'merge-node'
+    'split-proposal': 'split-replace', 'merge-proposal': 'merge-node',
+    'sever-proposal': 'sever-node'
   };
   const action = actionMap[conflict.type];
   if (!action) return;
@@ -815,6 +836,31 @@ function executeResolution(option, conflict, node) {
       
       if (!targetParent.data.children) targetParent.data.children = [];
       targetParent.data.children.push(liveNode);
+      liveNode.action = 'moved';
+    }
+  }
+
+  // --- SEVER RESOLUTION ---
+  else if (act === 'sever-node') {
+    if (liveParent) {
+      const idx = liveParent.children.findIndex(c => c.id === liveNode.id);
+      if (idx > -1) liveParent.children.splice(idx, 1);
+      
+      // Ensure the canvas is automatically converted to a Forest if it's currently a single top-down tree
+      if (!liveTreeData.value.isSystemRoot) {
+        const legacyRoot = JSON.parse(JSON.stringify(liveTreeData.value));
+        for (let key in liveTreeData.value) delete liveTreeData.value[key];
+        
+        liveTreeData.value.id = generateId();
+        liveTreeData.value.name = "Canvas Root";
+        liveTreeData.value.isSystemRoot = true;
+        liveTreeData.value.children = [legacyRoot];
+      }
+      
+      // Push the severed node directly to the canvas root array
+      if (!liveTreeData.value.children) liveTreeData.value.children = [];
+      liveTreeData.value.children.push(liveNode);
+      
       liveNode.action = 'moved';
     }
   }
