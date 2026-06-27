@@ -5,12 +5,14 @@ import { DEBUG_NETWORK } from './webrtc.service.js';
 
 export let ydoc = new Y.Doc();
 export let sharedTree = ydoc.getMap('treeData');
+export let sharedLogs = ydoc.getArray('actionLogs');
 
 export function applyHostState(updatePayload) {
   try {
     // Annihilate local vector clocks to prevent parallel initialization collisions
     ydoc = new Y.Doc();
     sharedTree = ydoc.getMap('treeData');
+    sharedLogs = ydoc.getArray('actionLogs');
     
     const update = new Uint8Array(updatePayload);
     Y.applyUpdate(ydoc, update, 'network');
@@ -139,4 +141,14 @@ export function updateSharedTreeRoot(jsonTree) {
 export function getSharedTreeJSON() {
   const rootMap = sharedTree.get('root');
   return rootMap instanceof Y.Map ? rootMap.toJSON() : null;
+}
+
+// Push a single JSON object to the distributed log array
+export function appendLogEntry(logObj) {
+  sharedLogs.push([logObj]);
+}
+
+// Extract the action logs as standard JSON
+export function getLogsJSON() {
+  return sharedLogs.toJSON();
 }

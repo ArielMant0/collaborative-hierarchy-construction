@@ -18,6 +18,11 @@
         <button :class="{ active: layoutMode === 'vertical' }" @click="$emit('updateLayout', 'vertical')">Vertical</button>
         <button :class="{ active: layoutMode === 'radial' }" @click="$emit('updateLayout', 'radial')">Radial</button>
       </div>
+      <div class="divider"></div>
+      <button class="sleek-btn outline" @click="$emit('toggleLogs')" title="View Action Logs">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+        Logs
+      </button>
       <button v-if="isDraftMode" class="sleek-btn primary commit-btn" @click="$emit('commitChanges')">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path><path d="M12 5l7 7-7 7"></path></svg>
         Merge to Staging
@@ -65,7 +70,7 @@ const props = defineProps({
   layoutMode: String
 });
 
-const emit = defineEmits(['switchMode', 'commitChanges', 'initHost', 'joinHost', 'updateUsername', 'updateLayout', 'addDockedNode']);
+const emit = defineEmits(['switchMode', 'commitChanges', 'initHost', 'joinHost', 'updateUsername', 'updateLayout', 'addDockedNode', 'toggleLogs']);
 
 const localJoinId = ref('');
 const localUsername = ref(props.netState.username);

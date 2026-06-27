@@ -2,7 +2,7 @@
 // It handles the conflict resolution execution matrix.
 
 import { ref, computed, onMounted, onUnmounted } from 'vue';
-import { sharedTree, applyNetworkUpdate, applyHostState, encodeCurrentState, updateSharedTreeRoot, getSharedTreeJSON } from '../services/crdt.service.js';
+import { sharedTree, applyNetworkUpdate, applyHostState, encodeCurrentState, updateSharedTreeRoot, getSharedTreeJSON, appendLogEntry, getLogsJSON } from '../services/crdt.service.js';
 import { webrtcService, DEBUG_NETWORK } from '../services/webrtc.service.js';
 import { removeDraftFlag, tagGlobalDuplicates} from '../utils/helpers.js';
 
@@ -10,16 +10,19 @@ export function useTreeState(netState) {
   const isDraftMode = ref(false);
   const liveTreeData = ref(null);
   const draftTreeData = ref(null);
+  const actionLogs = ref([]); // Reactivity Bridge for Logs
 
   const activeData = computed(() => isDraftMode.value ? draftTreeData.value : liveTreeData.value);
 
-function syncFromNetwork() {
+  function syncFromNetwork() {
     if (DEBUG_NETWORK) console.log(`[TreeState: Local Sync] 'tree-updated' event caught. Rebuilding reactive state.`);
     const parsedData = getSharedTreeJSON();
     if (parsedData) {
       tagGlobalDuplicates(parsedData); 
       liveTreeData.value = parsedData;
     }
+    // Sync the logs from CRDT to the reactive Vue ref
+    actionLogs.value = getLogsJSON();
   }
 
   function setupCRDTListeners() {
@@ -85,14 +88,32 @@ function applyChange() {
     isDraftMode.value = false;
   }
 
+  // function to write a log, broadcast, and update the UI
+  function logAction(actionType, details = '') {
+    appendLogEntry({
+      timestamp: Date.now(),
+      by: netState.username || netState.peerId || 'Unknown',
+      action: actionType,
+      details: details
+    });
+    
+    // Broadcast the updated CRDT log state to all peers
+    webrtcService.sendUpdate(encodeCurrentState(), netState.isHost);
+    
+    // Immediately trigger local UI sync
+    actionLogs.value = getLogsJSON();
+  }
+
   return {
     isDraftMode,
     liveTreeData,
     draftTreeData,
     activeData,
+    actionLogs,
     switchMode,
     applyChange,
     commitChanges,
-    syncFromNetwork
+    syncFromNetwork,
+    logAction
   };
 }

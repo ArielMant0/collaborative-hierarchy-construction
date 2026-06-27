@@ -11,6 +11,7 @@
       @updateUsername="(val) => netState.username = val"
       @updateLayout="(val) => layoutMode = val"
       @addDockedNode="openAddNodeModal"
+      @toggleLogs="showLogs = true"
     />
 
     <template v-if="netState.isReady || netState.status === 'disconnected'">
@@ -110,6 +111,11 @@
       @submit="confirmDelete" 
     />
 
+    <LogsViewer
+      :show="showLogs"
+      :logs="actionLogs"
+      @close="showLogs = false"
+    />
   </div>
 </template>
 
@@ -130,7 +136,7 @@ import TreeCanvas from './components/canvas/TreeCanvas.vue';
 import RenameModal from './components/ui/modals/RenameModal.vue';
 import SplitModal from './components/ui/modals/SplitModal.vue';
 import MergeModal from './components/ui/modals/MergeModal.vue';
-import DeleteModal from './components/ui/modals/DeleteModal.vue';
+import LogsViewer from './components/ui/modals/LogsViewer.vue';
 
 // Services & Utils
 import { sharedTree, updateSharedTreeRoot, encodeCurrentState } from './services/crdt.service.js';
@@ -139,7 +145,7 @@ import { generateId, canEditNode, cloneNode, addUUIDs, removeDraftFlag } from '.
 
 // 1. Initialize Composables
 const { netState, initHost, joinHost } = useNetwork();
-const { isDraftMode, liveTreeData, draftTreeData, activeData, switchMode, applyChange, commitChanges, syncFromNetwork } = useTreeState(netState);
+const { isDraftMode, liveTreeData, draftTreeData, activeData, actionLogs, switchMode, applyChange, commitChanges, syncFromNetwork, logAction } = useTreeState(netState);
 const { selectedNodes, isSingleLeafSelected, clearSelection, toggleSelection } = useSelection();
 
 const treeCanvasRef = ref(null);
@@ -183,6 +189,7 @@ const multiMergeModal = ref({ show: false, parentOptions: [] });
 const addNodeModal = ref({ show: false });
 const deleteModal = ref({ show: false, nodes: [], name: '' });
 const nodePingModal = ref({ show: false, sender: '', nodeId: null });
+const showLogs = ref(false);
 
 const notifications = ref([]);
 
@@ -281,6 +288,10 @@ onMounted(() => {
 
   webrtcService.addEventListener('ui-toast-trigger', (e) => {
     addNotification(e.detail);
+    // Let the Host act as the authority for network logging to prevent duplicate entries
+    if (netState.isHost && (e.detail.toLowerCase().includes('joined') || e.detail.toLowerCase().includes('disconnected') || e.detail.toLowerCase().includes('left'))) {
+      logAction('Network', e.detail);
+    }
   });
 
   webrtcService.addEventListener('node-ping-received', (e) => {
@@ -332,6 +343,7 @@ function handleNodeMoved({ draggedNode, targetNode }) {
   });
 
   webrtcService.sendNotification(`${netState.username} proposed move to '${targetData.name}'`, netState.isHost);
+  logAction('Move Proposal', `Proposed move to '${targetData.name}'`);
   applyChange();
 }
 
@@ -351,6 +363,7 @@ function toggleLock() {
   }
   n.lastEditedBy = netState.username;
   if (isDraftMode.value) n._isDraft = true;
+  logAction(n.locked ? 'Lock' : 'Unlock', `Targeted '${n.name}'`);
   applyChange();
 }
 
@@ -365,6 +378,7 @@ function addChild() {
     lastEditedBy: netState.username,
     action: 'added'
   });
+  logAction('Add Child', `Added child to '${n.name}'`);
   applyChange();
 }
 
@@ -386,6 +400,7 @@ function submitRename(newName) {
       if (!n.conflicts) n.conflicts = [];
       n.conflicts.push({ id: generateId(), type: 'rename', value: newName, by: netState.username });
       webrtcService.sendNotification(`${netState.username} proposed rename to '${newName}'`, netState.isHost);
+      logAction('Rename Proposal', `Proposed rename to '${newName}'`);
     }
 
     applyChange(); 
@@ -418,6 +433,7 @@ function confirmDelete(payload) {
   });
 
   webrtcService.sendNotification(`${netState.username} proposed deletion of ${deleteModal.value.nodes.length} node(s)`, netState.isHost);
+  logAction('Delete Proposal', `Targeted ${deleteModal.value.nodes.length} node(s)`);
   selectedNodes.value = [];
 
   applyChange();
@@ -441,6 +457,7 @@ function restoreNode() {
     if (isDraftMode.value) n.data._isDraft = true;
   });
   
+  logAction('Restore', `Restored ${selectedNodes.value.length} node(s)`);
   applyChange();
 }
 
@@ -476,6 +493,7 @@ function submitAddNode(newName) {
     activeData.value.children.push(newNode);
   }
   
+  logAction('Add Concept', `Created unplaced concept '${nodeName}'`);
   applyChange();
   addNodeModal.value.show = false;
 }
@@ -518,6 +536,7 @@ function handleDockedNodePlaced({ draggedNode, targetNode }) {
     activeData.value.children.push(extractedNode);
   }
 
+  logAction('Place Concept', `Placed concept '${extractedNode.name}' into hierarchy`);
   applyChange();
 }
 
@@ -537,6 +556,7 @@ function severNode() {
   });
 
   webrtcService.sendNotification(`${netState.username} proposed severing '${n.data.name}'`, netState.isHost);
+  logAction('Sever Proposal', `Proposed severing '${n.data.name}'`);
   applyChange();
 }
 
@@ -588,6 +608,7 @@ function confirmSplit(payload) {
   });
 
   webrtcService.sendNotification(`${netState.username} proposed split into ${names.length} parts`, netState.isHost);
+  logAction('Split Proposal', `Proposed split into ${names.length} parts`);
   applyChange();
   splitModal.value.show = false;
 }
@@ -695,6 +716,7 @@ function confirmMultiMerge(payload) {
   targetParentData.children.push(newNode);
   
   webrtcService.sendNotification(`${netState.username} proposed merge of ${selectedNodes.value.length} nodes into '${newName}'`, netState.isHost);
+  logAction('Merge Proposal', `Proposed merge of ${selectedNodes.value.length} nodes into '${newName}'`);
   selectedNodes.value = [];
   applyChange();
   multiMergeModal.value.show = false;
@@ -756,6 +778,7 @@ function discardConflict(payload) {
   }
 
   webrtcService.sendNotification(`${netState.username} discarded ${conflict.type.replace('-proposal', '')}`, netState.isHost);
+  logAction('Discard Proposal', `Discarded ${conflict.type.replace('-proposal', '')}`);
 
   // Trigger GC to automatically destroy any ghost UI nodes that belonged to this proposal
   cleanupOrphanedArtifacts(); 
@@ -776,6 +799,7 @@ function discardAllMerges(hostNodeId) {
     hostNode.conflicts = hostNode.conflicts.filter(c => c.type !== 'merge-proposal');
   }
   webrtcService.sendNotification(`${netState.username} discarded all merges`, netState.isHost);
+  logAction('Discard All Merges', `Target: '${hostNode.name}'`);
   cleanupOrphanedArtifacts(); 
   forceGlobalSync();
 }
@@ -1028,6 +1052,7 @@ function executeResolution(option, conflict, node) {
 
   const actionName = option.action === 'n-merges' ? 'all merges' : option.action.split('-')[0];
   webrtcService.sendNotification(`${netState.username} executed the ${actionName} proposal`, netState.isHost);
+  logAction('Execute Proposal', `Executed ${actionName} proposal`);
 
   // 4. FORCE SYNC AND REACTIVITY
   forceGlobalSync();
