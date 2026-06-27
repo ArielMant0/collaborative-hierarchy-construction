@@ -108,6 +108,15 @@ function recenter() {
   }
 }
 
+// Expose the zoom method to the orchestrator (App.vue)
+defineExpose({
+  zoomToNode: (nodeId) => {
+    if (renderer) {
+      renderer.zoomToNode(nodeId);
+    }
+  }
+});
+
 function handleHover({ event, d }) {
   if (d.data.mergedFrom && d.data.mergedStructure) {
     const generateHtml = (node) => {

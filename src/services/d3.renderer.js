@@ -183,6 +183,84 @@ export class TreeRenderer {
     }
   }
 
+  zoomToNode(nodeId) {
+    if (!this.currentZoomBehavior) return;
+    
+    let targetNode = null;
+    let targetEl = null;
+    this.nodeElements.forEach((el, node) => {
+      if (node.data.id === nodeId) {
+        targetNode = node;
+        targetEl = el;
+      }
+    });
+
+    if (!targetNode || !targetEl) return;
+
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    
+    const targetScale = 1.2;
+    
+    const tx = (width / 2) - (targetNode.px * targetScale);
+    const ty = (height / 2) - (targetNode.py * targetScale);
+
+    const transform = d3.zoomIdentity.translate(tx, ty).scale(targetScale);
+
+    const currentTransform = d3.zoomTransform(this.svg.node());
+    const midScale = Math.min(currentTransform.k, 0.5); 
+    const midTx = (width / 2) - (currentTransform.x / currentTransform.k * midScale);
+    const midTy = (height / 2) - (currentTransform.y / currentTransform.k * midScale);
+    const midTransform = d3.zoomIdentity.translate(midTx, midTy).scale(midScale);
+
+    this.svg.transition()
+      .duration(500)
+      .call(this.currentZoomBehavior.transform, midTransform)
+      .transition()
+      .duration(800)
+      .ease(d3.easeCubicOut)
+      .call(this.currentZoomBehavior.transform, transform)
+      .on("end", () => {
+        const pingRect = targetEl.insert("rect", ":first-child")
+          .attr("width", NODE_DIMENSIONS.width)
+          .attr("height", NODE_DIMENSIONS.height)
+          .attr("x", -NODE_DIMENSIONS.width / 2)
+          .attr("y", -NODE_DIMENSIONS.height / 2)
+          .attr("rx", 8)
+          .attr("fill", "none")
+          .attr("stroke", "#1a73e8")
+          .attr("stroke-width", 3)
+          .attr("opacity", 1);
+
+        function pulse() {
+          pingRect.transition()
+            .duration(1000)
+            .ease(d3.easeCubicOut)
+            .attr("width", NODE_DIMENSIONS.width + 40)
+            .attr("height", NODE_DIMENSIONS.height + 40)
+            .attr("x", -(NODE_DIMENSIONS.width + 40) / 2)
+            .attr("y", -(NODE_DIMENSIONS.height + 40) / 2)
+            .attr("stroke-width", 0)
+            .attr("opacity", 0)
+            .transition()
+            .duration(0)
+            .attr("width", NODE_DIMENSIONS.width)
+            .attr("height", NODE_DIMENSIONS.height)
+            .attr("x", -NODE_DIMENSIONS.width / 2)
+            .attr("y", -NODE_DIMENSIONS.height / 2)
+            .attr("stroke-width", 3)
+            .attr("opacity", 1)
+            .on("end", pulse);
+        }
+        
+        pulse();
+
+        setTimeout(() => {
+          pingRect.interrupt().remove();
+        }, 3000);
+      });
+  }
+
   createDragBehavior() {
     const renderer = this;
     return d3.drag()

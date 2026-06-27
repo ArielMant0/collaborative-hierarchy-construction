@@ -12,6 +12,7 @@
         <button class="sleek-btn outline" :disabled="isLocked" :style="disabledActionStyle" @click="$emit('addChild')">Add Child</button>
         <button v-if="isSingleLeafSelected" class="sleek-btn outline" :disabled="isLocked" :style="disabledActionStyle" @click="$emit('split')">Split</button>
         <button v-if="canSever" class="sleek-btn outline" :disabled="isLocked" :style="disabledActionStyle" @click="$emit('sever')">Sever</button>
+        <button class="sleek-btn outline" @click="$emit('pingAll')">Ping All</button>
         
         <!-- Unlock is the ONLY button that behaves differently -->
         <button class="sleek-btn outline" :disabled="isLocked && !canUnlock" :style="disabledUnlockStyle" @click="$emit('toggleLock')">{{ selectedNodes[0].data.locked ? 'Unlock' : 'Lock' }}</button>
@@ -93,7 +94,7 @@ const props = defineProps({
 
 defineEmits([
   'rename', 'addChild', 'split', 'toggleLock', 'delete', 
-  'restore', 'multiMerge', 'sever',
+  'restore', 'multiMerge', 'sever', 'pingAll',
   'acceptAllMerges', 'acceptConflict',
   'discardAllMerges', 'discardConflict' 
 ]);

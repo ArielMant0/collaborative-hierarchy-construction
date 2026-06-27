@@ -15,6 +15,7 @@
 
     <template v-if="netState.isReady || netState.status === 'disconnected'">
       <TreeCanvas 
+        ref="treeCanvasRef"
         :treeData="activeData"
         :isDraftMode="isDraftMode"
         :localPeerId="netState.peerId"
@@ -34,6 +35,7 @@
         @addChild="addChild"
         @split="openSplitModal"
         @sever="severNode"
+        @pingAll="pingAll"
         @toggleLock="toggleLock"
         @delete="deleteNode"
         @restore="restoreNode"
@@ -48,6 +50,19 @@
     <div v-else class="modal-overlay">
       <div class="modal-content" style="width: auto; text-align: center; font-weight: 600; color: #5f6368;">
         Synchronizing canonical state...
+      </div>
+    </div>
+
+    <div v-if="nodePingModal.show" class="modal-overlay">
+      <div class="modal-content">
+        <h3>Ping Received</h3>
+        <p style="font-size: 14px; color: #5f6368; line-height: 1.5; margin: 0;">
+          <strong>{{ nodePingModal.sender }}</strong> is drawing attention to a specific node. Navigate there now?
+        </p>
+        <div class="modal-actions" style="margin-top: 12px;">
+          <button class="sleek-btn outline" @click="nodePingModal.show = false">No, Stay Here</button>
+          <button class="sleek-btn primary" @click="acceptNodePing">Yes, Go To Node</button>
+        </div>
       </div>
     </div>
 
@@ -127,6 +142,7 @@ const { netState, initHost, joinHost } = useNetwork();
 const { isDraftMode, liveTreeData, draftTreeData, activeData, switchMode, applyChange, commitChanges, syncFromNetwork } = useTreeState(netState);
 const { selectedNodes, isSingleLeafSelected, clearSelection, toggleSelection } = useSelection();
 
+const treeCanvasRef = ref(null);
 const selectedIds = computed(() => new Set(selectedNodes.value.map(n => n.data.id)));
 
 // Scans the tree for conflicts hosted elsewhere that involve the selected node
@@ -166,6 +182,7 @@ const splitModal = ref({ show: false, node: null });
 const multiMergeModal = ref({ show: false, parentOptions: [] });
 const addNodeModal = ref({ show: false });
 const deleteModal = ref({ show: false, nodes: [], name: '' });
+const nodePingModal = ref({ show: false, sender: '', nodeId: null });
 
 const notifications = ref([]);
 
@@ -264,6 +281,14 @@ onMounted(() => {
 
   webrtcService.addEventListener('ui-toast-trigger', (e) => {
     addNotification(e.detail);
+  });
+
+  webrtcService.addEventListener('node-ping-received', (e) => {
+    const { sender, nodeId } = e.detail;
+    // Ensure we don't prompt the user who actually sent the ping
+    if (sender !== netState.username) {
+      nodePingModal.value = { show: true, sender, nodeId };
+    }
   });
 });
 
@@ -1089,6 +1114,23 @@ function cleanupOrphanedArtifacts() {
   }
   
   traverseAndClean(liveTreeData.value);
+}
+
+// 6. Navigation Actions
+function pingAll() {
+  if (selectedNodes.value.length !== 1) return;
+  const n = selectedNodes.value[0].data;
+  
+  webrtcService.sendNodePing(n.id, netState.username, netState.isHost);
+  addNotification(`Pinged all users to view '${n.name}'`);
+}
+
+function acceptNodePing() {
+  const nodeId = nodePingModal.value.nodeId;
+  if (nodeId && treeCanvasRef.value) {
+    treeCanvasRef.value.zoomToNode(nodeId); 
+  }
+  nodePingModal.value.show = false;
 }
 </script>
 
