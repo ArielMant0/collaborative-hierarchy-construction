@@ -753,7 +753,8 @@ function confirmMultiMerge(payload) {
     id: generateId(), 
     name: newName, 
     action: 'added', 
-    lastEditedBy: netState.username, 
+    lastEditedBy: netState.username,
+    isMergeHost: true,
     children: [], 
     conflicts: [] 
   };
@@ -892,11 +893,16 @@ function executeResolution(option, conflict, node) {
 
   const cachedConflicts = liveNode.conflicts ? [...liveNode.conflicts] : [];
 
-  // Only wipe the specific conflict being resolved (or all merges if n-merges is clicked)
+  // Wipe mutually exclusive conflicts (e.g., competing moves/splits) to prevent orphaned proposals
   if (option.action === 'n-merges') {
     liveNode.conflicts = cachedConflicts.filter(c => c.type !== 'merge-proposal');
   } else {
-    liveNode.conflicts = cachedConflicts.filter(c => c.id !== conflict.id);
+    const exclusiveTypes = ['move-proposal', 'split-proposal', 'rename', 'sever-proposal'];
+    if (exclusiveTypes.includes(conflict.type)) {
+      liveNode.conflicts = cachedConflicts.filter(c => c.type !== conflict.type);
+    } else {
+      liveNode.conflicts = cachedConflicts.filter(c => c.id !== conflict.id);
+    }
   }
   
   delete liveNode.action;
@@ -1082,6 +1088,16 @@ function executeResolution(option, conflict, node) {
     
     if (!liveNode.mergedStructure) liveNode.mergedStructure = { source: { children: [] } };
 
+    // Recursively strip ghost nodes to prevent visual artifacts in history and live state
+    const stripGhosts = (nodes) => {
+      if (!nodes) return [];
+      return nodes.filter(n => !n.isGhost).map(n => {
+        const cleanNode = { ...n };
+        if (cleanNode.children) cleanNode.children = stripGhosts(cleanNode.children);
+        return cleanNode;
+      });
+    };
+
     mergesToProcess.forEach(mConf => {
       let sourceParent = null, sourceData = null;
       root.each(n => {
@@ -1096,7 +1112,7 @@ function executeResolution(option, conflict, node) {
         liveNode.mergedStructure.source.children.push({
           id: generateId(),
           name: sourceData.name,
-          children: sourceData.children ? cloneNode(sourceData, netState.username).children : []
+          children: sourceData.children ? stripGhosts(cloneNode(sourceData, netState.username).children) : []
         });
 
         liveNode.mergedFrom = liveNode.mergedFrom 
@@ -1108,14 +1124,15 @@ function executeResolution(option, conflict, node) {
         
         if (sourceData.children) {
           if (!liveNode.children) liveNode.children = [];
-          sourceData.children.forEach(child => liveNode.children.push(cloneNode(child, netState.username)));
+          const cleanChildren = stripGhosts(sourceData.children);
+          cleanChildren.forEach(child => liveNode.children.push(cloneNode(child, netState.username)));
         }
       }
     });
     
     liveNode.name = conflict.proposedName || liveNode.name;
     liveNode.action = 'added'; 
-    if (liveNode.children) liveNode.children = liveNode.children.filter(c => !c.isGhost);
+    if (liveNode.children) liveNode.children = stripGhosts(liveNode.children);
   }
 
   liveNode.lastEditedBy = netState.username;
@@ -1185,8 +1202,9 @@ function cleanupOrphanedArtifacts() {
     parentData.children = parentData.children.filter(child => {
       if (child.isGhost && !validGhostIds.has(child.id)) return false;
 
+      // Filter and evaluate validity of merge sources
       if (child.conflicts && child.conflicts.some(c => c.type === 'merge-proposal')) {
-        const validConflicts = [];
+        let validConflicts = [];
         
         child.conflicts.forEach(c => {
           if (c.type === 'merge-proposal') {
@@ -1199,13 +1217,21 @@ function cleanupOrphanedArtifacts() {
           }
         });
         
-        child.conflicts = validConflicts;
-        const remainingMerges = child.conflicts.filter(c => c.type === 'merge-proposal');
-        
-        if (remainingMerges.length === 0 && !child.mergedStructure) {
-          return false; 
+        // Enforce minimum threshold: a merge requires at least 2 valid sources
+        const activeMerges = validConflicts.filter(c => c.type === 'merge-proposal');
+        if (activeMerges.length < 2) {
+          validConflicts = validConflicts.filter(c => c.type !== 'merge-proposal');
         }
+        
+        child.conflicts = validConflicts;
       }
+
+      // Evict merge hosts that lost their active proposals
+      if (child.isMergeHost && !child.mergedStructure) {
+        const hasActiveMerges = child.conflicts && child.conflicts.some(c => c.type === 'merge-proposal');
+        if (!hasActiveMerges) return false;
+      }
+
       return true;
     });
     parentData.children.forEach(traverseAndClean);
