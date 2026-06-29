@@ -242,12 +242,6 @@ function handleMouseMove(e) {
   }
 }
 
-const showDeleted = ref(true);
-
-function toggleDeleted() {
-  showDeleted.value = !showDeleted.value;
-}
-
 onMounted(() => {
   renderer = new TreeRenderer(svgRef.value, {
     onSelect: (payload) => emit('node-selected', payload),
@@ -274,19 +268,6 @@ onMounted(() => {
   if (props.treeData) renderer.render(props.treeData);
 });
 
-// ... (keep the other watch hooks exactly as they are)
-
-watch(() => [props.isDraftMode, props.localPeerId, props.selectedIds], () => {
-  if (renderer) {
-    renderer.updateContext({
-      isDraftMode: props.isDraftMode,
-      localPeerId: props.localPeerId,
-      selectedIds: props.selectedIds
-    });
-    renderer.render(props.treeData);
-  }
-}, { deep: true });
-
 onUnmounted(() => {
   window.removeEventListener('mousemove', handleMouseMove);
 });
@@ -295,21 +276,18 @@ watch(() => props.treeData, (newData) => {
   if (renderer && newData) renderer.render(newData);
 }, { deep: true });
 
-watch(() => [props.isDraftMode, props.localPeerId, props.selectedIds, showDeleted.value, props.layoutMode], (newVals, oldVals) => {
+watch(() => [props.isDraftMode, props.localPeerId, props.selectedIds, props.layoutMode], (newVals, oldVals) => {
   if (renderer) {
     renderer.updateContext({
       isDraftMode: props.isDraftMode,
       localPeerId: props.localPeerId,
       selectedIds: props.selectedIds,
-      showDeleted: showDeleted.value,
       layoutMode: props.layoutMode
     });
     renderer.render(props.treeData);
     
-    // Only snap the tree to the center if the 'showDeleted' toggle 
-    const showDeletedChanged = oldVals && oldVals[3] !== newVals[3];
-    const layoutModeChanged = oldVals && oldVals[4] !== newVals[4];
-    if ((showDeletedChanged && !newVals[3]) || layoutModeChanged) {
+    const layoutModeChanged = oldVals && oldVals[3] !== newVals[3];
+    if (layoutModeChanged) {
       renderer.recenter(props.treeData, true);
     }
   }

@@ -22,13 +22,14 @@ export function cloneNode(node, username) {
 }
 
 export function flattenTree(node, acc = []) {
-  if (node && node.action !== 'deleted' && !node.isGhost) acc.push(node);
+  // Include nodes with action === 'deleted' so they remain in the reference map 
+  // and are not erroneously evicted by the useSelection watcher, allowing users to restore them.
+  if (node && !node.isGhost) acc.push(node);
   if (node && node.children) {
     node.children.forEach(child => flattenTree(child, acc));
   }
   return acc;
 }
-
 export function canEditNode(nodeData, localPeerId) {
   if (!nodeData) return true;
   if (nodeData.action === 'deleted') return false;

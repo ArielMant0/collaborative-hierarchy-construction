@@ -34,7 +34,7 @@ export class TreeRenderer {
     this.initialRenderDone = false;
     this.nameColorScale = d3.scaleOrdinal(d3.schemePastel1);
     
-    this.ctx = { isDraftMode: false, localPeerId: null, selectedIds: new Set(), showDeleted: true, layoutMode: 'vertical' };
+    this.ctx = { isDraftMode: false, localPeerId: null, selectedIds: new Set(), layoutMode: 'vertical' };
     
     this.initCanvas();
     this.drag = this.createDragBehavior();
@@ -680,6 +680,9 @@ export class TreeRenderer {
 
     const nodesMerge = nodesEnter.merge(nodesData);
     
+    // Actively clear or apply the selected class based on the updated reactive context
+    nodesMerge.classed("selected", d => this.ctx.selectedIds.has(d.data.id));
+
     // 1. Cloak the group during the transform transition
     nodesMerge.transition(t)
       .attr("transform", d => `translate(${d.px},${d.py})`)

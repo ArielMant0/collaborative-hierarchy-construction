@@ -1,10 +1,7 @@
-// Manages local UI state for selected nodes and context menus
-
-import { ref, computed, onMounted, onUnmounted } from 'vue';
-import { getSharedTreeJSON } from '../services/crdt.service.js';
+import { ref, computed, watch } from 'vue';
 import { flattenTree } from '../utils/helpers.js';
 
-export function useSelection() {
+export function useSelection(activeData) {
   const selectedNodes = ref([]);
 
   const isSingleLeafSelected = computed(() => {
@@ -27,39 +24,18 @@ export function useSelection() {
     }
   };
 
-  const handleTreeUpdate = () => {
-    // Skip heavy lifting if nothing is selected
-    if (selectedNodes.value.length === 0) return;
-
-    // Grab a clean snapshot of the newly synced Yjs document
-    const latestData = getSharedTreeJSON();
-    if (!latestData) return;
-
-    // Build a quick lookup map of all currently valid nodes
-    const allNodes = flattenTree(latestData);
+  watch(activeData, (newData) => {
+    if (selectedNodes.value.length === 0 || !newData) return;
+    const allNodes = flattenTree(newData);
     const nodeMap = new Map(allNodes.map(n => [n.id, n]));
 
-    // Re-evaluate the current selection array
     selectedNodes.value = selectedNodes.value.filter(n => {
       const latestNodeData = nodeMap.get(n.data.id);
-      
-      // 1. Ghost Selection Fix: Node was physically deleted by a remote peer
       if (!latestNodeData) return false; 
-      
-      // 2. Stale Context Fix: Overwrite the reactive data reference to trigger Toolbox UI updates
       n.data = latestNodeData;
       return true;
     });
-  };
-
-  // Tie the network listener to the lifecycle of App.vue
-  onMounted(() => {
-    window.addEventListener('tree-updated', handleTreeUpdate);
-  });
-
-  onUnmounted(() => {
-    window.removeEventListener('tree-updated', handleTreeUpdate);
-  });
+  }, { deep: true });
 
   return {
     selectedNodes,

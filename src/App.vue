@@ -148,7 +148,7 @@ import { generateId, canEditNode, cloneNode, addUUIDs, removeDraftFlag } from '.
 // 1. Initialize Composables
 const { netState, initHost, joinHost } = useNetwork();
 const { isDraftMode, liveTreeData, draftTreeData, activeData, actionLogs, switchMode, applyChange, commitChanges, syncFromNetwork, logAction } = useTreeState(netState);
-const { selectedNodes, isSingleLeafSelected, clearSelection, toggleSelection } = useSelection();
+const { selectedNodes, isSingleLeafSelected, clearSelection, toggleSelection } = useSelection(activeData);
 
 const treeCanvasRef = ref(null);
 const selectedIds = computed(() => new Set(selectedNodes.value.map(n => n.data.id)));
