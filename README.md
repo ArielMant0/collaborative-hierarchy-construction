@@ -60,6 +60,20 @@ The updated JSON state flows through the reactivity bridge (`useTreeState.js`) t
 **5. Resolution Execution**
 A user interacts with the conflict prompt and selects an execution path. `App.vue` routes this interaction through the internal `executeResolution` matrix. The system executes the physical structural mutation on the target node, clears the specific atomic payload from the `conflicts` array, and forces a global sync of the new canonical base tree. Atomic deletions apply a soft-delete mechanism, appending historical data to a `deletedChildren` array to preserve the audit trail before splicing the node from the active structure.
 
+## Interaction & Keyboard Shortcuts
+
+| Interaction / Shortcut | Action |
+| :--- | :--- |
+| **`Ctrl` + Click** / **`Cmd` + Click** | Select a node |
+| **Double-Click** (Empty Canvas) | Instantiate a new floating concept at the absolute cursor coordinates. |
+| **Drag & Drop** (Node to Node) | Propose a structural move within the active hierarchy. |
+| **`Escape`** | Clear current node selections. |
+| **`Delete`** / **`Backspace`** | Trigger deletion proposal for the currently selected node(s). |
+| **`Ctrl` + `S`** / **`Cmd` + `S`** | Initiate a split operation (requires exactly one node selected). |
+| **`Ctrl` + `M`** / **`Cmd` + `M`** | Initiate a merge operation (requires multiple nodes selected). |
+| **`Ctrl` + `←` / `→`** | Navigate selection to the adjacent sibling node. |
+| **`Ctrl` + `Shift` + `←` / `→`** | Multi-select adjacent sibling nodes. |
+
 ## Testing Architecture
 
 The system is verified across two computational boundaries, isolating data transformation logic from distributed network execution. Continuous integration is enforced via GitHub Actions, which provisions a Linux container upon push events to execute all suites. Pipeline execution halts on assertion failure or browser timeout, establishing a regression boundary against structural degradation.
